@@ -97,6 +97,16 @@ class Connections {
         };
     };
 
+    async onNegotiationNeeded(connection, callback) {
+        try {
+            connection.onnegotiationneeded = (event) => {
+                callback();
+            };
+        } catch (error) {
+            console.log("...", error, error.name);
+        };
+    };
+
     // METODOS DE DEBUGGING
 
     async getStats(connection) {

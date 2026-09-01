@@ -5,7 +5,7 @@ class Signaling {
         this.socket = null;
     };
 
-    async connect(onServerDead) {
+    async connect(handleServerDown) {
 
         return new Promise((resolve, reject) => {
             this.socket = new WebSocket("wss://unshackle-think-return.ngrok-free.dev");
@@ -22,7 +22,7 @@ class Signaling {
 
             this.socket.onclose = (error) => {
                 console.log("WebSocket cerrado: ", error);
-                onServerDead();
+                handleServerDown();
             };
         });
 

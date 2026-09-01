@@ -1,5 +1,6 @@
 //main.js
 import Audio from "./audio/audio.js";
+import Display from "./display/display.js";
 import UI from "./ui/ui.js";
 import Connections from "./connections/connection.js";
 import Signaling from "./signaling/signaling.js";
@@ -22,10 +23,11 @@ class Orchestrator {
 
         // Dependencias compartidas por toda la app
         this.audio = new Audio();
+        this.display = new Display;
         this.ui = new UI();
         this.connections = new Connections();
         this.signaling = new Signaling();
-        
+
 
         this.init();
     }
@@ -53,11 +55,17 @@ class Orchestrator {
 
         //Desactiva el boton de salir de llamada
         this.ui.disableButton("button_to_close_connection");
+        this.ui.disableButton("button_to_stop_share_display");
+        this.ui.disableButton("button_to_share_display");
+
+
 
 
         this.ui.bindEnterCallButton("button_to_enter_into_the_call", async () => {
             try {
-                
+
+                this.ui.enableButton("button_to_share_display");
+
 
                 const microphone = await this.audio.requestMicrophoneAccess();
 
@@ -65,7 +73,7 @@ class Orchestrator {
                     await this.signaling.connect(() => {
                         this.handleServerDown();
                     });
-                    
+
                     const username = this.ui.getUsername();
                     this.signaling.sendMessage(null, null, username);
 
@@ -78,13 +86,68 @@ class Orchestrator {
                 };
 
             } catch (error) {
-                console.log("Hubo un error a la hora de ejecutar el script en init(): ", error);
+                console.log("Hubo un error al intentar ingresar a la llamada: ", error);
             };
         });//Boton UI de empezar llamada
+
+        this.ui.bindShareDisplayButton("button_to_share_display", async () => {
+            try {
+                this.ui.disableButton("button_to_share_display");
+                this.ui.enableButton("button_to_stop_share_display");
+
+                const video = await this.display.requestVideoAccess();
+
+                if (video == true) {
+                    for (const peer of this.connectionsList.values()) {
+                        if (peer) await peer.addDisplayTrack();
+                        
+                    };
+
+                    const tracks = await this.display.getVideoTracks();
+                    if (tracks) {
+                        for (const track of tracks) {
+                            this.display.onDisplayEnded(track, async () => {
+                                await this.stopSharingDisplay();
+                            });
+                        };
+                    };
+                } else {
+                    alert("Debe seleccionar algo para compartir, petardo");
+                    this.ui.enableButton("button_to_share_display");
+                    this.ui.disableButton("button_to_stop_share_display");
+                    
+                };
+            } catch (error) {
+                console.log("Hubo un error al intentar compartir pantalla");
+            };
+        });//Boton UI de empezar a compartir pantalla
+
+
+        this.ui.bindStopShareDisplayButton("button_to_stop_share_display", async () => {
+            try {
+                this.ui.disableButton("button_to_stop_share_display");
+                await this.stopSharingDisplay();
+
+                const tracks = await this.display.getVideoTracks();
+                if (tracks) {
+                    for (const track of tracks) {
+                        track.stop();
+                    };
+                };
+            } catch (error) {
+                console.log("Hubo un error al dejar de compartir pantalla");
+            };
+        });//Boton UI de dejar de compartir pantalla
 
 
         this.ui.bindExitCallButton("button_to_close_connection", async () => {
             try {
+
+                this.ui.disableButton("button_to_close_connection");
+                this.ui.disableButton("button_to_stop_share_display");
+                this.ui.disableButton("button_to_share_display");
+
+
                 //CLOSE CONNECTIONS------------------------------------------
                 for (const peer of this.connectionsList.values()) {
                     if (peer) peer.close();
@@ -105,6 +168,8 @@ class Orchestrator {
                 document.getElementById("audio_site").replaceChildren();
                 document.getElementById("audio_from").replaceChildren();
 
+                document.getElementById("video_site").replaceChildren();
+
             } catch (error) {
                 console.log("Ocurrio un error al momento de intentar salir de la llamada", error);
             };
@@ -121,20 +186,21 @@ class Orchestrator {
 
     async onOffer(id, data) {
         if (!id) return;
+        console.log("oferta recibida de", id);   // ← agrega esto
 
-        
+
         const peer = this.connectionsList.get(id);
         if (!peer) return;
 
-        await peer.addLocalTracks();
+        await peer.addAudioTracks();
 
-        
+
         const answer = await peer.createAnswer(data);
         if (answer) {
             await this.signaling.sendMessage("answer", answer, null, id);
         }
-        
-        
+
+
     };
 
     async onAnswer(id, data) {
@@ -156,7 +222,6 @@ class Orchestrator {
     };
 
     onExit(data) {
-        // El servidor no manda "id" en este mensaje, el peer que salio viene en "data".
         if (!data) return;
 
         this.removeDeadConnection(data);
@@ -165,18 +230,28 @@ class Orchestrator {
     async onJoin(id) {
         if (!id) return;
 
-        const peer = new PeerConnection(id, this.userName, this.signaling, this.connections, this.audio);
+        const peer = new PeerConnection(id, this.userName, this.signaling, this.connections, this.audio, this.display);
         await peer.connect();
         this.connectionsList.set(id, peer);
 
-        await peer.addLocalTracks();
+        await peer.addAudioTracks();
 
-        const audioPromise = peer.waitForRemoteAudio();
-        const offer = await peer.createOffer();
-        await this.signaling.sendMessage("offer", offer, null, id);
+        if (this.display.stream) {
+            await peer.addDisplayTrack()
+        }
 
-        const audio = await audioPromise;
-        this.ui.showPeer(id, audio);
+        peer.onRemoteAudio((track) => {
+            this.ui.showAudioPeer(id, track);
+        });
+
+        peer.onRemoteVideo(
+            (track) => {
+                this.ui.showVideoPeer(id, track);
+            },
+            () => {
+                this.ui.removeVideo(id);
+            }
+        );
 
         peer.monitorState((deadId) => this.removeDeadConnection(deadId));
     };
@@ -184,25 +259,35 @@ class Orchestrator {
     async onId(id) {
         if (!id) return;
 
-        const peer = new PeerConnection(id, this.userName, this.signaling, this.connections, this.audio);
+        const peer = new PeerConnection(id, this.userName, this.signaling, this.connections, this.audio, this.display);
         await peer.connect();
         this.connectionsList.set(id, peer);
     };
 
     async onUsers(data) {
         for (const peerId of data) {
-            const peer = new PeerConnection(peerId, this.userName, this.signaling, this.connections, this.audio);
+            const peer = new PeerConnection(peerId, this.userName, this.signaling, this.connections, this.audio, this.display);
             await peer.connect();
             this.connectionsList.set(peerId, peer);
 
-            await peer.addLocalTracks();
+            await peer.addAudioTracks();
 
-            const audioPromise = peer.waitForRemoteAudio();
-            const offer = await peer.createOffer();
-            await this.signaling.sendMessage("offer", offer, null, peerId);
+            if (this.display.stream) {
+                await peer.addDisplayTrack()
+            }
 
-            const audio = await audioPromise;
-            this.ui.showPeer(peerId, audio);
+            peer.onRemoteAudio((track) => {
+                this.ui.showAudioPeer(peerId, track);
+            });
+
+            peer.onRemoteVideo(
+                (track) => {
+                    this.ui.showVideoPeer(peerId, track);
+                },
+                () => {
+                    this.ui.removeVideo(peerId);
+                }
+            );
 
             peer.monitorState((deadId) => this.removeDeadConnection(deadId));
         };
@@ -246,6 +331,7 @@ class Orchestrator {
         this.connectionsList.delete(id);
         this.ui.removeAudio(id);
         this.ui.removeText(id);
+        this.ui.removeVideo(id);
     };
 
     //Se ejecuta cuando el WebSocket se cierra (el servidor se cayo): limpia el estado local, no se le puede avisar al server.
@@ -277,31 +363,16 @@ class Orchestrator {
         };
     };
 
+    async stopSharingDisplay() {
+        for (const peer of this.connectionsList.values()) {
+            const senders = await this.display.getVideoSenders(peer.connection);
+            const videoSender = senders.find(sender => sender.track && sender.track.kind === 'video');
+            console.log("peer:", peer.id, "videoSender:", videoSender);   // ← agrega esto
+            if (videoSender) peer.connection.removeTrack(videoSender);
+        };
+        this.ui.enableButton("button_to_share_display");
+    };
+
 };//Class
 
 const app = new Orchestrator();
-
-// El audio nunca pasa por el servidor — solo viaja directamente entre los navegadores una vez que ICE establece la ruta.
-
-// PIPELINE GENERAL DEL SISTEMA
-// 1. La UI dispara `init()` del Orchestrator.
-// 2. El usuario pulsa entrar a la llamada.
-// 3. `Audio` solicita permiso al microfono y expone tracks/senders.
-// 4. `Signaling` abre el WebSocket y empieza a escuchar mensajes del servidor.
-// 5. Por cada peer, `PeerConnection` encapsula su propio RTCPeerConnection, tracks, offer/answer e ICE pendiente.
-// 6. `listenForMessages()` es el unico lugar que decide, segun el tipo de mensaje, que metodos de PeerConnection llamar.
-// 7. El servidor solo coordina el signaling; el audio viaja directo entre pares.
-
-
-//SOLUCIONADO:
-// Toca crear el sistema que detecte cuando una persona cierra el navegador o lo actualiza y sacarlo de la llamada.
-// Toca mejorar el diseño.
-// Toca limpiar el codigo, hacerlo mas legible para mi.
-// Refactorizar Codigo
-// Toca crear el sistema que permita tener nombres personalizables.
-// Toca crear el sistema para subir-bajar el volumen a alguien.
-// Toca crear el sistema para mutear el microfono.
-
-
-//POR SOLUCIONAR:
-// Portearlo a otras pc's para ver si funciona.

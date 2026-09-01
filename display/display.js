@@ -1,30 +1,24 @@
-//audio.js
-class Audio {
+//Display.js
+class Display {
 
     constructor() {
         this.stream = null;
         this.trackHandlers = {};
     };
 
-    async requestMicrophoneAccess() {
+    async requestVideoAccess() {
         try {
 
-            this.stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-
-                    echoCancellation: false,
-                    noiseSuppression: true,
-                    autoGainControl: true,
+            this.stream = await navigator.mediaDevices.getDisplayMedia({
+                video: {
 
                     //Calidad
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 },
+                    frameRate: { ideal: 60, max: 60 },
 
-                    sampleRate: 96000,
-                    sampleSize: 24,
-                    channelCount: 2,
 
-                    //Latencia
 
-                    latency: 0,
 
                 }
             });
@@ -32,20 +26,35 @@ class Audio {
             return true;
 
         } catch (error) {
-            console.error("Error al obtener permiso para usar el microfono:", error, error.name);
+            console.error("Error al obtener permiso para iniciar Display Share:", error, error.name);
             return false;
         };
     };
 
-    async getAudioTracks() {
+
+    async verificationSettingsVideo(track) {
         try {
-            return this.stream.getTracks();
+
+            const settingsVideo = track.getSettings();
+
+            console.log(settingsVideo);
+
+            return settingsVideo;
+
+        } catch (error) {
+            console.error("Error al obtener los settings de video: ", error)
+        }
+    }
+
+    async getVideoTracks() {
+        try {
+            return this.stream.getVideoTracks();
         } catch (error) {
             console.log("Ocurrio un error al momento de intentar obtener los tracks: ", error);
         };
     };
 
-    async getAudioSenders(connection) {
+    async getVideoSenders(connection) {
         try {
             return connection.getSenders();
         } catch (error) {
@@ -53,7 +62,7 @@ class Audio {
         };
     };
 
-    hasAudioTrack(track, senders) {
+    hasVideoTrack(track, senders) {
         try {
 
             return senders.some((sender) => {
@@ -65,7 +74,7 @@ class Audio {
         };
     };
 
-    async addAudioTrack(track, connection) {
+    async addVideoTrack(track, connection) {
         try {
 
             return connection.addTrack(track, this.stream);
@@ -75,7 +84,7 @@ class Audio {
         };
     };
 
-    async configureAudioSender(sender) {
+    async configureVideoSender(sender) {
         try {
 
             if (sender) {
@@ -85,7 +94,8 @@ class Audio {
                     parameters.encodings = [{}];
                 };
 
-                parameters.encodings[0].maxBitrate = 510000;
+                parameters.encodings[0].maxBitrate = 8_000_000;
+                parameters.encodings[0].degradationPreference = "maintain-framerate"
 
                 await sender.setParameters(parameters);
             };
@@ -95,15 +105,35 @@ class Audio {
         };
     };
 
-    async onRemoteAudioTrack(id, connection, callback) {
+    async onDisplayEnded(track, onEndDisplayShare) {
+        try {
+
+            track.onended = (event) => {
+                console.log(event)
+                onEndDisplayShare()
+            }
+
+        } catch (error) {
+            console.error("Ocurrio un error al intentar cerrar el Display Share")
+        }
+    }
+
+    async onRemoteVideoTrack(id, connection, callback, onEndDisplayShare) {
         try {
 
             const handler = (event) => {
-                
-                const kind = event.track.kind
-                
-                if (kind === "audio") {
-                    callback(event.streams[0])
+
+                const kind = event.track.kind;
+
+                if (kind === "video") {
+                    callback(event.streams[0]);
+
+
+                    const stream = event.streams[0];
+                    stream.onremovetrack = (removeEvent) => {
+                        console.log(removeEvent);
+                        onEndDisplayShare();
+                    };
                 }
             };
 
@@ -115,7 +145,7 @@ class Audio {
         };
     };
 
-    async removeAudioTrackListener(id, connection) {
+    async removeVideoTrackListener(id, connection) {
         try {
 
             const handlerToDelete = this.trackHandlers[id];
@@ -131,4 +161,4 @@ class Audio {
     };
 };
 
-export default Audio;
+export default Display;

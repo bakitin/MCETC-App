@@ -2,13 +2,15 @@
 
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="style.css">
-    <title>MCETC App</title>
-    
+    <!-- <title>Michientucu App</title> -->
+    <title>p1</title>
 </head>
+
 <body>
 
     <div id="modal_overlay" class="overlay">
@@ -20,33 +22,46 @@
 
 
     <div id="background_container">
-        <h1>MCETC App</h1>
+        <h1>P1</h1>
         <h3 id="usarname_grettings"></h3>
-        
+
 
         <div id="main_container">
 
-            <button id="button_to_enter_into_the_call">
-                Entrar a llamada
-            </button>
+            <fieldset class="button_group">
+                <legend>Llamada</legend>
+                <button id="button_to_enter_into_the_call">
+                    Entrar a llamada
+                </button>
+                <button id="button_to_close_connection">
+                    Salir de llamada
+                </button>
+            </fieldset>
 
-            <button id="button_to_close_connection">
-                Salir de llamada
-            </button>
+            <fieldset class="button_group">
+                <legend>Pantalla compartida</legend>
+                <button id="button_to_share_display">
+                    Compartir pantalla
+                </button>
+                <button id="button_to_stop_share_display">
+                    Dejar de compartir
+                </button>
+            </fieldset>
 
-            
+
             <h3 id="audio_from"></h3>
-            <div id="audio_site">
-                
-            </div>
+            <div id="audio_site"></div>
+
+            <div id="video_site"></div>
 
         </div>
 
 
     </div>
 
-    
+
 
 </body>
-    <script src="main.js" type="module" defer></script>
+<script src="main.js" type="module" defer></script>
+
 </html>

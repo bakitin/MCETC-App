@@ -1,7 +1,7 @@
 //peerconnection.js
 class PeerConnection {
 
-    constructor(id, userName, signaling, connections, audio) {
+    constructor(id, userName, signaling, connections, audio, display) {
         // Estado propio de este peer
         this.id = id;
         this.connection = null;
@@ -15,6 +15,7 @@ class PeerConnection {
         this.signaling = signaling;
         this.connections = connections;
         this.audio = audio;
+        this.display = display;
     };
 
 
@@ -23,26 +24,51 @@ class PeerConnection {
         this.connection = await this.connections.createConnection();
 
         this.connections.onIceCandidate(this.connection, (candidate) => {
-            this.signaling.sendMessage("ice", candidate.toJSON(), null, this.id);
+            this.sendMessage("ice", candidate.toJSON())
+        });
+
+
+        this.connections.onNegotiationNeeded(this.connection, async () => {
+            console.log("negociación disparada de nuevo");   // ← agrega esto
+            const offer = await this.createOffer();
+            await this.sendMessage("offer", offer);
         });
     };
 
-    async addLocalTracks() {
-        const tracks = await this.audio.getTracks();
-        const senders = await this.audio.getSenders(this.connection);
+    async addAudioTracks() {
+        const tracks = await this.audio.getAudioTracks();
+        const senders = await this.audio.getAudioSenders(this.connection);
 
         for (const track of tracks) {
-            const alreadyAdded = await this.audio.hasTrack(track, senders);
+            const alreadyAdded = await this.audio.hasAudioTrack(track, senders);
 
             if (!alreadyAdded) {
-                const sender = await this.audio.addTrack(track, this.connection);
-                await this.audio.configureSender(sender);
+                const sender = await this.audio.addAudioTrack(track, this.connection);
+                await this.audio.configureAudioSender(sender);
             };
         };
     };
 
-    waitForRemoteAudio() {
-        return this.audio.waitForRemoteTrack(this.id, this.connection);
+    async addDisplayTrack() {
+        const tracks = await this.display.getVideoTracks();
+        const senders = await this.display.getVideoSenders(this.connection);
+
+        for (const track of tracks) {
+            const alreadyAdded = await this.display.hasVideoTrack(track, senders);
+
+            if (!alreadyAdded) {
+                const sender = await this.display.addVideoTrack(track, this.connection);
+                await this.display.configureVideoSender(sender);
+            };
+        };
+    };
+
+    onRemoteAudio(callback) {
+        this.audio.onRemoteAudioTrack(this.id, this.connection, callback)
+    };
+
+    onRemoteVideo(callback, onEndDisplayShare) {
+        this.display.onRemoteVideoTrack(this.id, this.connection, callback, onEndDisplayShare)
     };
 
     async createOffer() {
@@ -102,12 +128,17 @@ class PeerConnection {
 
     };
 
+    async sendMessage(type, data) {
+        await this.signaling.sendMessage(type, data, null, this.id);
+    };
+
     monitorState(onDead) {
         this.connections.monitorState(this.id, this.connection, onDead);
     };
 
     close() {
-        this.audio.removeTrackListener(this.id, this.connection);
+        this.audio.removeAudioTrackListener(this.id, this.connection);
+        this.display.removeVideoTrackListener(this.id, this.connection);
         this.connection.close();
     };
 };
