@@ -5,7 +5,7 @@ import UI from "./ui/ui.js";
 import Connections from "./connections/connection.js";
 import Signaling from "./signaling/signaling.js";
 import PeerConnection from "./peerconnection/peerconnection.js";
-
+import Chat from "./chat/chat.js";
 
 
 function onLoad() {
@@ -27,6 +27,7 @@ class Orchestrator {
         this.ui = new UI();
         this.connections = new Connections();
         this.signaling = new Signaling();
+        this.chat = new Chat(this.signaling)
 
 
         this.init();
@@ -57,14 +58,14 @@ class Orchestrator {
         this.ui.disableButton("button_to_close_connection");
         this.ui.disableButton("button_to_stop_share_display");
         this.ui.disableButton("button_to_share_display");
-
-
-
+        this.ui.disableButton("button_send_chat");
 
         this.ui.bindEnterCallButton("button_to_enter_into_the_call", async () => {
             try {
 
                 this.ui.enableButton("button_to_share_display");
+                
+
 
 
                 const microphone = await this.audio.requestMicrophoneAccess();
@@ -74,15 +75,20 @@ class Orchestrator {
                         this.handleServerDown();
                     });
 
-                    const username = this.ui.getUsername();
+                    const username = this.userName;
                     this.signaling.sendMessage(null, null, username);
 
                     await this.listenForMessages();
+                    
 
                     this.ui.disableButton("button_to_enter_into_the_call");
                     this.ui.enableButton("button_to_close_connection");
                 } else {
                     alert("Debe permitir el acceso al microfono");
+                    this.ui.disableButton("button_to_close_connection");
+                    this.ui.disableButton("button_to_stop_share_display");
+                    this.ui.disableButton("button_to_share_display");
+                    this.ui.disableButton("button_send_chat");
                 };
 
             } catch (error) {
@@ -100,7 +106,8 @@ class Orchestrator {
                 if (video == true) {
                     for (const peer of this.connectionsList.values()) {
                         if (peer) await peer.addDisplayTrack();
-                        
+                        if (peer) await peer.addDisplayAudioTrack();
+
                     };
 
                     const tracks = await this.display.getVideoTracks();
@@ -112,16 +119,13 @@ class Orchestrator {
                         };
                     };
                 } else {
-                    alert("Debe seleccionar algo para compartir, petardo");
                     this.ui.enableButton("button_to_share_display");
                     this.ui.disableButton("button_to_stop_share_display");
-                    
                 };
             } catch (error) {
                 console.log("Hubo un error al intentar compartir pantalla");
             };
         });//Boton UI de empezar a compartir pantalla
-
 
         this.ui.bindStopShareDisplayButton("button_to_stop_share_display", async () => {
             try {
@@ -134,11 +138,17 @@ class Orchestrator {
                         track.stop();
                     };
                 };
+
+                const audioTracks = await this.display.getSystemAudioTracks();
+                if (audioTracks) {
+                    for (const track of audioTracks) {
+                        track.stop();
+                    };
+                };
             } catch (error) {
-                console.log("Hubo un error al dejar de compartir pantalla");
+                console.log("Hubo un error al dejar de compartir pantalla", error);
             };
         });//Boton UI de dejar de compartir pantalla
-
 
         this.ui.bindExitCallButton("button_to_close_connection", async () => {
             try {
@@ -175,6 +185,21 @@ class Orchestrator {
             };
         });//Boton UI de cerrar llamada
 
+        this.ui.bindSendMessageButton("chat_input_row", async () => {
+            try {
+                const message = this.ui.getInputValue("chat_input");
+                this.chat.sendChatMessage(message);
+                this.ui.showChatPeer(this.userName, message, true);
+                this.ui.clearInput("chat_input");
+            } catch (error) {
+                console.log("Ocurrio un error al mandar un mensaje", error)
+            }
+        });//Boton UI de enviar mensaje
+
+        this.ui.bindMuteCallButton("button_to_mute_microphone", async () =>{
+            const state = await this.audio.setMicronoMuteOrUnmuted();
+            this.ui.switchIcon("button_to_mute_microphone",state)
+        });
 
         //En caso de cerrar el navegador enviar un mensaje de salida de llamada
         window.addEventListener("beforeunload", () => {
@@ -186,6 +211,7 @@ class Orchestrator {
 
     async onOffer(id, data) {
         if (!id) return;
+
         console.log("oferta recibida de", id);   // ← agrega esto
 
 
@@ -210,6 +236,7 @@ class Orchestrator {
         if (!peer) return;
 
         await peer.applyAnswer(data);
+        this.ui.enableButton("button_send_chat");
     };
 
     async onIce(id, data) {
@@ -238,6 +265,7 @@ class Orchestrator {
 
         if (this.display.stream) {
             await peer.addDisplayTrack()
+            await peer.addDisplayAudioTrack();
         }
 
         peer.onRemoteAudio((track) => {
@@ -254,10 +282,12 @@ class Orchestrator {
         );
 
         peer.monitorState((deadId) => this.removeDeadConnection(deadId));
+        this.ui.enableButton("button_send_chat");
     };
 
     async onId(id) {
         if (!id) return;
+        if (id === this.userName) return;   // ← evita crear un peer de uno mismo
 
         const peer = new PeerConnection(id, this.userName, this.signaling, this.connections, this.audio, this.display);
         await peer.connect();
@@ -274,6 +304,7 @@ class Orchestrator {
 
             if (this.display.stream) {
                 await peer.addDisplayTrack()
+                await peer.addDisplayAudioTrack();
             }
 
             peer.onRemoteAudio((track) => {
@@ -293,8 +324,34 @@ class Orchestrator {
         };
     };
 
+    onChatMessage(data, id) {
+        this.ui.showChatPeer(id, data)
+    }
+
     onError(data) {
         alert(data);
+
+        localStorage.removeItem("username")
+
+        if (this.ui.getUsername() == null) {
+            this.ui.showUsernameModal("modal_overlay");
+
+            this.ui.bindSaveUsername("btn_close", () => {
+                const username = this.ui.getUsernameInput("usarname_input");
+                localStorage.setItem('username', username);
+                this.ui.hideUsernameModal("modal_overlay");
+                this.userName = username
+                location.reload()
+            });
+
+        } else {
+            const username = this.ui.getUsername();
+            this.ui.showUsername("usarname_grettings", username);
+            this.userName = username
+            location.reload()
+        };
+
+
     };
 
     //Escucha los mensajes del servidor y arma/actualiza el PeerConnection de cada peer segun el caso.
@@ -310,6 +367,7 @@ class Orchestrator {
                     join_notification: (id, data) => this.onJoin(id),
                     id_notification: (id, data) => this.onId(id),
                     users_in_connection: (id, data) => this.onUsers(data),
+                    chat_message: (id, data) => this.onChatMessage(data, id),
                     error: (id, data) => this.onError(data)
                 };
 
@@ -366,9 +424,12 @@ class Orchestrator {
     async stopSharingDisplay() {
         for (const peer of this.connectionsList.values()) {
             const senders = await this.display.getVideoSenders(peer.connection);
+
             const videoSender = senders.find(sender => sender.track && sender.track.kind === 'video');
-            console.log("peer:", peer.id, "videoSender:", videoSender);   // ← agrega esto
             if (videoSender) peer.connection.removeTrack(videoSender);
+
+            const audioSender = senders.find(sender => sender.track && sender.track.kind === 'audio' && sender.track.label === "System Audio");
+            if (audioSender) peer.connection.removeTrack(audioSender);
         };
         this.ui.enableButton("button_to_share_display");
     };

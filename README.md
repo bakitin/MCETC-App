@@ -1,259 +1,543 @@
-# MCETC Real-Time Voice Connect
+# P1 — App de llamada de audio + pantalla compartida (WebRTC)
 
-[![JavaScript](https://img.shields.io/badge/JavaScript-ES%20Modules-F7DF1E?logo=javascript&logoColor=000)](https://developer.mozilla.org/docs/Web/JavaScript)
-[![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![WebRTC](https://img.shields.io/badge/WebRTC-P2P%20Audio%20%2B%20Screen-2F855A)](https://developer.mozilla.org/docs/Web/API/WebRTC_API)
-[![WebSocket](https://img.shields.io/badge/WebSocket-Signaling-1C64F2)](https://developer.mozilla.org/docs/Web/API/WebSocket)
-[![Version](https://img.shields.io/badge/Version-v1.1.0-6F42C1)](https://github.com/)
+README completo, explicado desde cero. Si nunca tocaste este código, empieza por aquí y
+léelo en orden.
 
-> A modular browser-based real-time communication platform built with vanilla JavaScript, WebRTC, and a lightweight Python WebSocket signaling server.
+Los términos técnicos (stream, offer, ICE, etc.) están enlazados al
+[GLOSARIO.md](GLOSARIO.md). Haz ctrl + clic en cada enlace la primera vez que aparezca.
 
-## Overview
 
-MCETC Real-Time Voice Connect started as a browser-first audio communication project and has evolved into a lightweight real-time collaboration app that supports both microphone-based voice and live screen sharing. The application captures microphone input in the browser, negotiates WebRTC connections between participants, and can now add display tracks dynamically without reworking the entire call flow.
+ACLARACION---
 
-The system remains intentionally lightweight and framework-free. That makes it easy to understand, easy to debug, and straightforward to extend into a more complete communication product. In its current form, it offers real-time peer-to-peer audio, dynamic screen sharing, and automatic renegotiation for mid-call media changes — all while keeping the signaling server focused on route coordination rather than media transport.
+En el editor estás viendo el texto crudo: las tablas de Markdown siempre se ven desalineadas ahí porque cada celda tiene distinto ancho. Al renderizarlas se ven bien.
 
-## Features
+Para verlo renderizado en VS Code:
 
-- Real-time browser voice calls with WebRTC.
-- Screen sharing support built on `getDisplayMedia()` and a dedicated `Display` module.
-- Mic capture handled directly in the browser via `getUserMedia()`.
-- Dynamic renegotiation for changes to the media graph after a connection is already active, including the addition of screen-share tracks mid-call.
-- Peer-to-peer media transport so audio and screen content do not pass through the signaling server.
-- WebSocket-based signaling for offers, answers, ICE candidates, and room presence updates, **routed to the specific recipient peer** rather than broadcast to the whole room.
-- **Perfect negotiation** per peer connection (`polite` / `makingOffer` state) so concurrent offers and renegotiations do not collide.
-- Multi-peer connection management using a dedicated `PeerConnection` instance per participant.
-- Automatic peer creation when a new participant joins the room.
-- Automatic display propagation to peers that join after the screen share has already started.
-- Dynamic audio and video rendering in the DOM for remote participants, with automatic cleanup when a participant leaves, drops, or ends screen sharing.
-- STUN-based connectivity support to help peers establish direct routes across networks.
-- Modular code separation between audio, display, UI, connection, peer-connection, and signaling responsibilities.
-- Lightweight frontend with no framework dependency or build step.
-- Python backend that tracks connected clients and relays signaling messages to the correct recipient.
-- Simple button-driven flow to start a call, share screen, stop sharing, and disconnect cleanly.
+1. [Ctrl+Shift+V] → abre la vista previa en una pestaña.
 
-## Tech Stack
+2. Ctrl+K y luego V → vista previa al lado, se actualiza mientras editas.
 
-- HTML5 for the application shell.
-- CSS3 for layout and visual styling.
-- Vanilla JavaScript using ES modules.
-- WebRTC for peer-to-peer audio and screen transport.
-- WebSocket API for signaling coordination.
-- Python 3 for the backend signaling server.
-- `websockets` Python package for the async WebSocket server.
-- Native browser media APIs such as `navigator.mediaDevices.getUserMedia()`, `navigator.mediaDevices.getDisplayMedia()`, and `RTCPeerConnection`.
-- STUN servers from public providers to assist NAT traversal.
+3. El icono de lupa/pantalla dividida arriba a la derecha del editor.
 
-## Folder Structure
 
-```text
-/
-├── index.html
-├── main.js
-├── style.css
-├── audio/
-│   └── audio.js
-├── display/
-│   └── display.js
-├── connections/
-│   └── connection.js
-├── peerconnection/
-│   └── peerconnection.js
-├── signaling/
-│   └── signaling.js
-├── ui/
-│   └── ui.js
-└── server/
-    ├── main.py
-    ├── manejo_de_clientes/
-    │   └── worker.py
-    └── websocket/
-        └── worker.py
+---
+
+## 1. ¿Qué hace la app?
+
+Es una llamada grupal por el navegador:
+
+- Cada persona entra con un nombre.
+- Al entrar, comparte su **micrófono** con todos los demás.
+- Opcionalmente puede **compartir su pantalla**; los demás la ven en un `<video>`.
+- No hay backend propio de media: el audio y el video viajan **directo entre navegadores**
+  usando [WebRTC](GLOSARIO.md#7-rtcpeerconnection).
+- Solo hay un **servidor de señalización** (un WebSocket) que sirve para que los
+  navegadores se encuentren y se pongan de acuerdo. Ese servidor **no está en este repo**
+  (es una URL de ngrok en [signaling/signaling.js:11](signaling/signaling.js#L11)).
+
+Topología: **malla completa** (full mesh). Con N personas, cada navegador mantiene N‑1
+[RTCPeerConnection](GLOSARIO.md#7-rtcpeerconnection), una por cada otra persona. No hay
+servidor central que mezcle el audio.
+
+---
+
+## 2. Qué necesitas para que funcione
+
+1. Servir la carpeta por HTTP (no abrir `index.html` con doble clic). Los módulos ES y
+   `getUserMedia` necesitan `http://localhost` o `https://`.
+   Ejemplo: `python -m http.server` dentro de la carpeta, y abrir `http://localhost:8000`.
+2. El servidor de señalización tiene que estar vivo en la URL de
+   [signaling/signaling.js:11](signaling/signaling.js#L11). Si no, no pasa nada al pulsar
+   "Entrar a llamada".
+3. Permitir el micrófono cuando el navegador lo pida.
+
+---
+
+## 3. Estructura de archivos
+
+```
+index.html                    Estructura visual + IDs que el JS busca. Carga main.js como módulo.
+style.css                     Estilos. Nada de lógica.
+main.js                       Orquestador. Une todas las piezas y maneja los eventos de botones.
+signaling/signaling.js        Clase Signaling — habla con el servidor por WebSocket.
+connections/connection.js     Clase Connections — crea y opera el objeto RTCPeerConnection.
+audio/audio.js                Clase Audio — micrófono: capturar, enviar, recibir.
+display/display.js            Clase Display — pantalla: capturar, enviar, recibir.
+peerconnection/peerconnection.js  Clase PeerConnection — TODO lo de UN peer remoto junto.
+ui/ui.js                      Clase UI — crear/borrar elementos del DOM. Sin lógica de red.
+GLOSARIO.md                   Explicación de cada concepto WebRTC.
 ```
 
-- `index.html` contains the entry UI and loads the JavaScript module bundle.
-- `main.js` holds `Orchestrator`, which coordinates microphone capture, display capture, WebRTC negotiation, signaling, and DOM updates, and routes each incoming signaling message to the right handler.
-- `style.css` defines the visual appearance of the current interface and responsive media layout.
-- `audio/` contains microphone permission handling, track attachment, and remote audio reception.
-- `display/` contains screen-sharing permissions, display track configuration, and remote screen-stream handling.
-- `connections/` contains the low-level `RTCPeerConnection` helpers: creating a connection, generating offers/answers, setting local/remote descriptions, and handling ICE negotiation state.
-- `peerconnection/` contains `PeerConnection`, one instance per participant — it owns that participant's `RTCPeerConnection`, its pending ICE candidates, and its perfect-negotiation state, and borrows `Connections`/`Signaling`/`Audio`/`Display` instead of creating its own.
-- `signaling/` contains the WebSocket client used to communicate with the signaling server.
-- `ui/` contains DOM helpers, button state management, and the updated separated audio/video rendering logic.
-- `server/` contains the Python WebSocket backend and its support modules for client tracking and message relaying.
+Regla mental: **cada clase es una capa**. `main.js` (arriba) llama a `PeerConnection`, que
+llama a `Connections` / `Audio` / `Display` / `Signaling` (abajo). Las capas de abajo
+nunca llaman hacia arriba: reciben *callbacks*.
 
-## Dynamic Project Architecture
+---
 
-The application is organized around a central orchestration flow in `main.js`, with `Audio` and `Display` both feeding media into the same peer lifecycle.
+## 4. El HTML: los IDs que el código busca
 
-```mermaid
-flowchart LR
-    A[Browser UI] --> B[Audio Module]
-    A --> C[Display Module]
-    A --> D[Orchestrator]
-    D --> E[WebSocket Signaling Client]
-    E <--> F[Python WebSocket Server]
-    F --> G[Client Registry]
-    D --> H[PeerConnection per participant]
-    H --> B
-    H --> C
-    H --> I[RTCPeerConnection]
-    I <--> J[Remote Peers]
-    J --> K[Remote Audio and Screen Elements]
+Todo lo que `ui.js` y `main.js` manipulan sale de estos IDs (están en
+[index.html](index.html)). Si renombras un ID aquí, hay que renombrarlo en el JS.
+
+| ID | Qué es | Quién lo usa |
+|---|---|---|
+| `modal_overlay` | Capa oscura del modal de nombre | `showUsernameModal` / `hideUsernameModal` |
+| `usarname_input` | Input de texto del nombre *(sí, está mal escrito)* | `getUsernameInput` |
+| `btn_close` | Botón "Guardar" del modal | `bindSaveUsername` |
+| `usarname_grettings` | `<h3>` que saluda con tu nombre *(mal escrito)* | `showUsername` |
+| `button_to_enter_into_the_call` | Botón "Entrar a llamada" | `bindEnterCallButton` |
+| `button_to_close_connection` | Botón "Salir de llamada" | `bindExitCallButton` |
+| `button_to_share_display` | Botón "Compartir pantalla" | `bindShareDisplayButton` |
+| `button_to_stop_share_display` | Botón "Dejar de compartir" | `bindStopShareDisplayButton` |
+| `audio_from` | `<h3>` donde se listan los nombres de quienes se oyen | `showAudioPeer` / `removeText` |
+| `audio_site` | Contenedor de los `<audio>` remotos | `showAudioPeer` / `removeAudio` |
+| `video_site` | Contenedor de los `<video>` remotos | `showVideoPeer` / `removeVideo` |
+
+`main.js` se carga así: `<script src="main.js" type="module" defer></script>`
+([index.html:65](index.html#L65)). Al cargarse el módulo, la última línea de `main.js`
+(`const app = new Orchestrator()`) arranca todo.
+
+---
+
+## 5. EL PIPELINE (flujo de una llamada, de principio a fin)
+
+Esta es la parte importante. Léela entera aunque no entiendas cada paso; luego la
+referencia de cada método (sección 6) la aclara.
+
+### 5.1 Arranque de la página
+
+1. Se carga `main.js` → se ejecuta `new Orchestrator()`
+   ([main.js:378](main.js#L378)).
+2. El constructor crea **una** instancia de cada clase compartida (`Audio`, `Display`,
+   `UI`, `Connections`, `Signaling`) y un `Map` vacío `connectionsList` (id del peer →
+   objeto `PeerConnection`). Luego llama a `init()`.
+3. `init()`:
+   - Si no hay nombre en `localStorage`, muestra el modal y espera a que guardes uno.
+   - Si ya hay, te saluda y guarda el nombre en `this.userName`.
+   - Deja **deshabilitados** los botones de salir y de pantalla.
+   - "Ata" (bind) los 4 botones a sus funciones.
+   - Registra `beforeunload` para avisar al servidor si cierras la pestaña.
+
+En este punto la app está quieta, esperando que pulses **Entrar a llamada**.
+
+### 5.2 Entrar a la llamada
+
+Al pulsar **Entrar a llamada** ([main.js:64](main.js#L64)):
+
+1. Habilita el botón "Compartir pantalla".
+2. `audio.requestMicrophoneAccess()` → pide el micro con
+   [getUserMedia](GLOSARIO.md#2-getusermedia-y-getdisplaymedia). Devuelve `true`/`false`.
+   El [MediaStream](GLOSARIO.md#1-mediastream-vs-mediastreamtrack) del micro queda en
+   `audio.stream`.
+3. Si dio permiso:
+   - `signaling.connect(...)` → abre el **WebSocket**
+     ([signaling](GLOSARIO.md#8-signaling-señalización--y-por-qué-hace-falta-un-servidor-aparte)).
+   - `signaling.sendMessage(null, null, username)` → manda tu nombre al servidor para
+     registrarte.
+   - `listenForMessages()` → engancha el "router" que reacciona a cada mensaje del
+     servidor.
+   - Deshabilita "Entrar", habilita "Salir".
+
+### 5.3 El servidor te presenta a los demás
+
+El servidor responde con mensajes que caen en el router de
+`listenForMessages()` ([main.js:301](main.js#L301)). Los tipos:
+
+| Mensaje del servidor | Handler | Qué provoca |
+|---|---|---|
+| `users_in_connection` | `onUsers(data)` | `data` es la lista de ids ya presentes. Creas un `PeerConnection` completo por cada uno. |
+| `join_notification` | `onJoin(id)` | Alguien **nuevo** entró. Creas su `PeerConnection` completo. |
+| `id_notification` | `onId(id)` | Creas un `PeerConnection` **básico** (sin tracks ni listeners todavía). |
+| `offer` | `onOffer(id, data)` | Te llegó una [offer](GLOSARIO.md#9-offer--answer--sdp). Agregas tu audio y respondes con una answer. |
+| `answer` | `onAnswer(id, data)` | Respuesta a tu offer. La aplicas como descripción remota. |
+| `ice` | `onIce(id, data)` | Un [ICE candidate](GLOSARIO.md#11-ice-candidate-stun-servidores-ice) del otro. Lo agregas (o lo pones en cola). |
+| `exit_notification` | `onExit(data)` | Alguien salió. Limpias su conexión y su UI. |
+| `error` | `onError(data)` | `alert(data)`. |
+
+### 5.4 Montar una conexión con otro peer (el corazón)
+
+Cuando creas un `PeerConnection` "completo" (`onJoin` / `onUsers`):
+
+1. `new PeerConnection(id, userName, signaling, connections, audio, display)` — guarda el
+   id del peer remoto y las dependencias.
+2. `peer.connect()`:
+   - Crea el [RTCPeerConnection](GLOSARIO.md#7-rtcpeerconnection) real con la lista de
+     servidores [STUN](GLOSARIO.md#11-ice-candidate-stun-servidores-ice).
+   - Engancha [onicecandidate](GLOSARIO.md#12-onicecandidate): cada candidato que el
+     navegador descubre se manda al otro por señalización (`sendMessage("ice", ...)`).
+   - Engancha [onnegotiationneeded](GLOSARIO.md#18-negotiationneeded-renegociación): cuando
+     haga falta (re)negociar, crea una offer y la manda.
+3. `peer.addAudioTracks()`:
+   - Coge los [tracks](GLOSARIO.md#1-mediastream-vs-mediastreamtrack) del micro.
+   - Por cada uno que no esté ya puesto: `connection.addTrack(track, stream)`
+     ([addTrack](GLOSARIO.md#14-addtrack--removetrack)) → devuelve un
+     [sender](GLOSARIO.md#15-rtcrtpsender--rtcrtpreceiver-sender--receiver).
+   - `configureAudioSender(sender)` le pone bitrate máximo.
+   - **Ese `addTrack` dispara `negotiationneeded`** → se crea la offer automáticamente y se
+     manda por el WebSocket.
+4. Si tú ya estabas compartiendo pantalla (`display.stream` existe), también
+   `peer.addDisplayTrack()`.
+5. `peer.onRemoteAudio(cb)` / `peer.onRemoteVideo(cb, cbFin)`:
+   - Enganchan el evento [track](GLOSARIO.md#17-ontrack-evento-track-y-eventstreams). Cuando
+     el media del otro empieza a llegar, el callback recibe el `stream` y `ui` crea el
+     `<audio>` o `<video>`.
+6. `peer.monitorState(cb)`:
+   - Engancha [onconnectionstatechange](GLOSARIO.md#22-connectionstate--onconnectionstatechange).
+     Si la conexión pasa a `failed` / `disconnected` / `closed`, se llama a
+     `removeDeadConnection(id)`.
+
+### 5.5 El ida y vuelta offer/answer/ICE
+
+Entre los dos navegadores, por el WebSocket, pasa esto (puede solaparse en el tiempo):
+
+```
+NAV A                                   SERVIDOR                 NAV B
+  |-- addTrack dispara negotiationneeded ----------------------------> |
+  |-- sendMessage("offer", SDP) ---------> relay ----> onOffer(A, SDP) |
+  |                                                    addAudioTracks()|
+  |                                                    createAnswer()  |
+  | onAnswer(B, SDP) <---- relay <-------- sendMessage("answer", SDP) --|
+  |                                                                    |
+  |-- onicecandidate x N: sendMessage("ice", c) --> relay --> onIce ---> |
+  | <---- relay <---- onicecandidate x N: sendMessage("ice", c) --------|
+  |                                                                    |
+  |   (cuando un par de candidatos funciona)                           |
+  |   connectionState = "connected"  →  el audio ya fluye directo      |
 ```
 
-### How it works
+- La offer sale de `createOffer()` →
+  [setLocalDescription](GLOSARIO.md#10-setlocaldescription--setremotedescription).
+- `onOffer` en B:
+  [setRemoteDescription](GLOSARIO.md#10-setlocaldescription--setremotedescription)(offer)
+  → `createAnswer()` → `setLocalDescription`(answer) → manda la answer.
+- `onAnswer` en A: `setRemoteDescription`(answer). Negociación cerrada
+  ([signalingState](GLOSARIO.md#21-signalingstate) vuelve a `stable`).
+- Los ICE candidates que lleguen **antes** de tener `remoteDescription` se guardan en
+  `pendingIceCandidates` y se aplican después
+  ([cola de candidatos](GLOSARIO.md#13-candidatos-ice-que-llegan-antes-de-tiempo-pendingicecandidates)).
 
-1. The user presses the start button in the browser.
-2. The app requests microphone permissions and stores the local audio stream.
-3. A WebSocket connection is opened to the signaling server.
-4. The server assigns a client ID and sends the current room state back to the new participant.
-5. The client creates one `PeerConnection` per remote participant, which in turn creates its own `RTCPeerConnection`.
-6. The app adds local audio tracks to each peer connection, and can later add a display track when the user chooses to share their screen.
-7. The browser exchanges `offer`, `answer`, and `ice` messages through the signaling server — each one addressed to a specific recipient, not broadcast.
-8. If both sides happen to offer media at the same moment, perfect negotiation resolves the collision instead of failing.
-9. If a track is added or removed after the connection is already active, the browser fires `negotiationneeded`, and the `PeerConnection` automatically re-negotiates and re-sends the offer.
-10. Once ICE negotiation succeeds, audio and screen data flow directly between browsers.
-11. Remote streams are rendered dynamically as `<audio>` and `<video>` elements in the page, and removed automatically when that participant leaves or the display stream ends.
+### 5.6 Compartir pantalla (renegociación)
 
-### Data flow
+Al pulsar **Compartir pantalla** ([main.js:93](main.js#L93)):
 
-- `Audio` manages the local microphone stream and attaches audio tracks to each peer connection.
-- `Display` manages the local screen-share stream and configures sender settings such as target bitrate and frame-rate preference for screen capture.
-- `Connections` builds and configures `RTCPeerConnection` instances, including SDP and ICE handling — it has no memory of any specific peer.
-- `PeerConnection` is the per-participant object: it holds one participant's `RTCPeerConnection`, id, pending ICE candidates, negotiation state, and calls into `Connections`/`Signaling`/`Audio`/`Display` to do the actual work.
-- `Signaling` serializes messages through WebSocket and listens for signaling events.
-- `UI` isolates button handling and DOM rendering responsibilities, including `showAudioPeer`/`showVideoPeer` and the corresponding removal logic for audio and video elements.
-- `Orchestrator` coordinates the full lifecycle, keeps `connectionsList` (a `Map` of id → `PeerConnection`) in sync with the room, and dispatches each incoming message type through a handler map instead of a long `switch`.
+1. `display.requestVideoAccess()` →
+   [getDisplayMedia](GLOSARIO.md#2-getusermedia-y-getdisplaymedia). Sale el selector nativo.
+2. Por **cada** peer ya conectado: `peer.addDisplayTrack()` → `addTrack` del video →
+   **cada uno dispara `negotiationneeded`** → una offer nueva por peer →
+   [renegociación](GLOSARIO.md#18-negotiationneeded-renegociación).
+3. `display.onDisplayEnded(track, cb)` engancha
+   [track.onended](GLOSARIO.md#6-trackonended-vs-streamonremovetrack): si paras la
+   compartición desde el botón nativo del navegador, se llama a `stopSharingDisplay()`.
 
-### Adding new peers
+Del lado que recibe: el evento `track` con `kind === "video"` crea el `<video>`, y además
+se engancha
+[stream.onremovetrack](GLOSARIO.md#6-trackonended-vs-streamonremovetrack) para saber
+cuándo el otro deja de compartir.
 
-When a new participant joins, the backend notifies existing clients with a `join_notification`. Each active browser then creates a dedicated `PeerConnection` for the newcomer, adds local audio tracks, checks whether a display stream is already active, and adds the screen-share track when needed. The resulting offer is then sent through the signaling channel — addressed to that one participant.
+### 5.7 Dejar de compartir
 
-### Screen-sharing lifecycle
+Al pulsar **Dejar de compartir** ([main.js:126](main.js#L126)) o al cerrar desde el
+navegador:
 
-The new media flow is designed for dynamic mid-call changes:
+1. `stopSharingDisplay()`: por cada peer busca el
+   [sender](GLOSARIO.md#15-rtcrtpsender--rtcrtpreceiver-sender--receiver) de video y hace
+   `connection.removeTrack(sender)` ([removeTrack](GLOSARIO.md#14-addtrack--removetrack)).
+   Eso dispara otra renegociación y, en el otro lado, `stream.onremovetrack`.
+2. `track.stop()` sobre los tracks de pantalla para apagar la captura de verdad
+   ([track.stop()](GLOSARIO.md#5-trackstop--apagar-la-fuente-de-verdad)).
 
-- `PeerConnection` exposes `onNegotiationNeeded`, so a connection can renegotiate whenever a new track is added or removed.
-- `Display` exposes persistent remote-track callbacks (`onRemoteVideoTrack`) rather than a single-use Promise, so the same peer can send audio and later send a screen-share stream without losing the handler.
-- When sharing ends, either via the browser's native stop control or the custom button, the app removes each sender from all live peer connections, which triggers a fresh renegotiation automatically.
-- On the receiving side, `stream.onremovetrack` is used to detect that a display stream is no longer available and remove the corresponding video element from the DOM.
-- New peers joining after a participant has already started screen sharing receive the display stream immediately because the app checks `display.stream` during `onJoin`/`onUsers`.
+### 5.8 Salir de la llamada
 
-### Reusing the template logic
+Al pulsar **Salir de llamada** ([main.js:143](main.js#L143)):
 
-The architecture is already modular enough to scale in the following directions:
+1. Deshabilita los 3 botones de acción.
+2. `peer.close()` en cada peer: quita los listeners de audio/video y cierra el
+   `RTCPeerConnection`.
+3. Manda `exit_notification` al servidor, vacía `connectionsList`, cierra el WebSocket.
+4. Habilita "Entrar", vacía los contenedores de audio y video del DOM
+   (`replaceChildren()`).
 
-- more call controls such as mute, unmute, and device switching,
-- additional room state handling,
-- participant metadata and avatars,
-- recording or transcription layers,
-- persistent call history,
-- or a full admin dashboard around the signaling backend.
+### 5.9 Alguien se cae o el servidor muere
 
-## Installation and Setup
+- **Un peer se cae**: su `onconnectionstatechange` → `removeDeadConnection(id)` → `close()`
+  + borrar del `Map` + borrar su UI. También llega `exit_notification` → `onExit` hace lo
+  mismo.
+- **El servidor se cae**: el WebSocket dispara `onclose` → `handleServerDown()` → cierra
+  todos los peers y limpia (no se puede avisar a nadie, el canal murió).
 
-### Prerequisites
+---
 
-- A modern browser with WebRTC support.
-- Python 3.10+ recommended.
-- The `websockets` package installed in your Python environment.
-- VS Code Live Server or any local HTTP server for the frontend.
+## 6. Referencia clase por clase, método por método
 
-### Backend setup
+### 6.1 `Signaling` — [signaling/signaling.js](signaling/signaling.js)
 
-1. Open a terminal in the project root.
-2. Create and activate a virtual environment if you do not already have one.
-3. Install the Python dependency:
+El único puente con el servidor. Habla **JSON por WebSocket**.
 
-```bash
-pip install websockets
-```
+| Miembro | Qué hace |
+|---|---|
+| `this.socket` | El objeto `WebSocket`. `null` hasta conectar. |
+| `connect(handleServerDown)` | Devuelve una `Promise`. Abre el WebSocket a la URL fija. `onopen` → `resolve()`. `onerror` → `reject()`. `onclose` → llama `handleServerDown()` (el servidor murió). |
+| `disconect()` | *(sí, falta una "s")* Cierra el socket. Se usa al salir de la llamada. |
+| `sendMessage(type, data, username = null, to_client_id = null)` | Si el socket está `OPEN`, arma `{ type, data }`, y si le pasas `username` o `to_client_id` los añade al objeto. Manda `JSON.stringify(message)`. `to_client_id` = "este mensaje es para tal peer". |
+| `onMessage(callback)` | Pone `socket.onmessage`. Parsea `{ type, data, id }` del mensaje entrante y llama `callback(type, data, id)`. `id` = quién lo originó. Si el JSON es inválido, lo ignora. |
 
-4. Start the signaling server:
+Formato de mensaje **que sale**: `{ type, data, username?, to_client_id? }`.
+Formato **que entra**: `{ type, data, id }`.
 
-```bash
-python server/main.py
-```
+### 6.2 `Connections` — [connections/connection.js](connections/connection.js)
 
-The backend listens on `localhost:8765`.
+Envoltorio fino sobre el [RTCPeerConnection](GLOSARIO.md#7-rtcpeerconnection). No guarda
+estado; recibe la `connection` como parámetro en casi todos los métodos.
 
-### Frontend setup
+| Método | Qué hace |
+|---|---|
+| `createConnection()` | `new RTCPeerConnection({ iceServers: [...] })` con 9 servidores [STUN](GLOSARIO.md#11-ice-candidate-stun-servidores-ice) públicos. Devuelve el objeto. **No hay TURN** → si ambos peers están tras NAT muy cerrado, la conexión puede fallar. |
+| `monitorState(id, connection, onDeadConnection)` | Pone `connection.onconnectionstatechange`. Lee `connection.connectionState`; si es `failed`, `disconnected` o `closed`, llama `onDeadConnection(id)`. Ver [connectionState](GLOSARIO.md#22-connectionstate--onconnectionstatechange). |
+| `createOffer(connection)` | `await connection.createOffer()`. Devuelve el SDP de [offer](GLOSARIO.md#9-offer--answer--sdp). |
+| `createAnswer(connection)` | `await connection.createAnswer()`. Devuelve el SDP de answer. |
+| `setLocalDescription(connection, description)` | `await connection.setLocalDescription(description)`. Ver [descripciones](GLOSARIO.md#10-setlocaldescription--setremotedescription). |
+| `setRemoteDescription(connection, description)` | `await connection.setRemoteDescription(description)`. |
+| `onIceCandidate(connection, callback)` | Pone `connection.onicecandidate`. Solo llama `callback(event.candidate)` si `event.candidate` no es `null` (null = "ya terminé de buscar"). Ver [onicecandidate](GLOSARIO.md#12-onicecandidate). |
+| `onNegotiationNeeded(connection, callback)` | Pone `connection.onnegotiationneeded`; llama `callback()` sin argumentos. Ver [negotiationneeded](GLOSARIO.md#18-negotiationneeded-renegociación). |
+| `getStats(connection)` | Solo debug. `await connection.getStats()`, recorre e imprime cada entrada. Ver [getStats()](GLOSARIO.md#23-getstats--mirar-por-dentro-debugging). |
 
-1. Serve the project with a local HTTP server such as Live Server.
-2. Open `index.html` through that server, not directly with `file://`.
-3. If you are running everything locally, update the WebSocket URL in `signaling/signaling.js` so it points to your local signaling server instead of the hosted tunnel currently defined in the code.
-4. Accept the browser permission prompts for both microphone access and screen capture when you start a call or share your display.
+### 6.3 `Audio` — [audio/audio.js](audio/audio.js)
 
-### Recommended local workflow
+Todo lo del micrófono. Una sola instancia para toda la app (un micro, muchos peers).
 
-1. Start the Python signaling server.
-2. Launch the frontend through Live Server.
-3. Open the page in two (or more) browser tabs or devices.
-4. Grant microphone permissions.
-5. Press the start button on each client and verify that audio is exchanged peer to peer.
-6. Use the screen-share button to start a display stream, then stop it either through the custom button or the browser's native control to confirm renegotiation and DOM cleanup work correctly.
+| Miembro | Qué hace |
+|---|---|
+| `this.stream` | El [MediaStream](GLOSARIO.md#1-mediastream-vs-mediastreamtrack) del micro. `null` hasta pedir permiso. |
+| `this.trackHandlers` | Objeto `{ idPeer: handler }`. Guarda la función que escucha el evento `track` de cada peer, para poder quitarla luego. |
+| `requestMicrophoneAccess()` | [getUserMedia](GLOSARIO.md#2-getusermedia-y-getdisplaymedia) con constraints de audio (echo cancel off, noise suppression on, 96 kHz, 24 bits, estéreo, latencia 0). Guarda en `this.stream`. Devuelve `true` si hubo permiso, `false` si no. |
+| `getAudioTracks()` | `this.stream.getTracks()` — devuelve **todos** los tracks del stream (aquí solo hay audio). |
+| `getAudioSenders(connection)` | `connection.getSenders()` — los [senders](GLOSARIO.md#15-rtcrtpsender--rtcrtpreceiver-sender--receiver) actuales de esa conexión. |
+| `hasAudioTrack(track, senders)` | `true` si algún sender ya está enviando ese track (compara por `track.id`). Sirve para no añadir el mismo track dos veces. |
+| `addAudioTrack(track, connection)` | `connection.addTrack(track, this.stream)`. Devuelve el sender. Dispara [negotiationneeded](GLOSARIO.md#18-negotiationneeded-renegociación). |
+| `configureAudioSender(sender)` | Lee `sender.getParameters()`, garantiza `encodings[0]`, pone `maxBitrate = 510000`, aplica con `setParameters()`. Ver [setParameters](GLOSARIO.md#16-sendergetparameters--setparameters--calidad-de-envío). |
+| `onRemoteAudioTrack(id, connection, callback)` | Crea un handler para el evento [track](GLOSARIO.md#17-ontrack-evento-track-y-eventstreams); si `event.track.kind === "audio"`, llama `callback(event.streams[0])`. Lo engancha con `addEventListener("track", handler)` y lo guarda en `trackHandlers[id]`. |
+| `removeAudioTrackListener(id, connection)` | Coge el handler guardado, hace `removeEventListener("track", handler)` y lo borra de `trackHandlers`. |
 
-## Responsive Design
+### 6.4 `Display` — [display/display.js](display/display.js)
 
-The current UI is intentionally minimal, but the project is structured to work across desktop, tablet, and mobile browsers. The layout uses standard HTML, a viewport meta tag, and responsive CSS rules for both the audio and video containers, which keeps the interface functional across common screen sizes.
+Igual que `Audio` pero para la pantalla. Mismos patrones, con un extra: detectar el fin de
+la compartición por los **dos** lados.
 
-For production use, the layout should be expanded with dedicated breakpoints, stronger spacing rules, and a more complete mobile call experience. The new `#video_site` container and dynamic `video` sizing logic are a strong base for more polished screen-sharing layouts.
+| Miembro | Qué hace |
+|---|---|
+| `this.stream` / `this.trackHandlers` | Igual que en `Audio`, pero para video. |
+| `requestVideoAccess()` | [getDisplayMedia](GLOSARIO.md#2-getusermedia-y-getdisplaymedia) pidiendo 1920×1080 @ 60fps *ideal*. Guarda en `this.stream`. Devuelve `true`/`false`. |
+| `verificationSettingsVideo(track)` | `track.getSettings()` → imprime y devuelve lo que el navegador **realmente** dio (puede ser menos que lo pedido). Ver [getSettings](GLOSARIO.md#3-trackgetsettings--lo-que-el-navegador-te-dio-de-verdad). *(No lo llama nadie ahora mismo; es utilidad de debug.)* |
+| `getVideoTracks()` | `this.stream.getVideoTracks()`. |
+| `getVideoSenders(connection)` | `connection.getSenders()`. |
+| `hasVideoTrack(track, senders)` | Igual que `hasAudioTrack`. |
+| `addVideoTrack(track, connection)` | `connection.addTrack(track, this.stream)`. Devuelve el sender. |
+| `configureVideoSender(sender)` | `maxBitrate = 8_000_000` y `degradationPreference = "maintain-framerate"` (si va mal la red, prefiere perder nitidez antes que fluidez). |
+| `onDisplayEnded(track, onEndDisplayShare)` | Pone `track.onended`. Se dispara **en quien comparte** cuando para desde el botón nativo del navegador. Ver [onended](GLOSARIO.md#6-trackonended-vs-streamonremovetrack). |
+| `onRemoteVideoTrack(id, connection, callback, onEndDisplayShare)` | Handler del evento `track` con `kind === "video"`: llama `callback(event.streams[0])` para pintar el `<video>`, y además pone `stream.onremovetrack = () => onEndDisplayShare()` para detectar cuándo el otro deja de compartir. Guarda el handler en `trackHandlers[id]`. |
+| `removeVideoTrackListener(id, connection)` | Igual que en `Audio`. |
 
-## Performance and Optimization
+### 6.5 `PeerConnection` — [peerconnection/peerconnection.js](peerconnection/peerconnection.js)
 
-- Audio and screen content travel directly between peers once WebRTC negotiation is complete.
-- The signaling server only exchanges control messages, and now routes them to the intended recipient instead of broadcasting to every connected client — less noise, fewer chances of a message being misapplied to the wrong connection.
-- The codebase is split into small modules, making the runtime easier to reason about and the app easier to maintain.
-- Display capture uses configured quality settings up to 1080p at 60 FPS, with targeted bitrate control and frame-rate preference to keep the stream fluid without exhausting bandwidth.
-- STUN servers are used to improve connectivity across NATs and less friendly network environments.
-- The frontend is dependency-light, which keeps the payload small and the boot process fast.
+**La clase clave.** Una instancia = toda la relación con **un** peer remoto. `main.js`
+guarda estas instancias en el `Map` `connectionsList`.
 
-## What's New in v1.0.4
+| Miembro | Qué es |
+|---|---|
+| `this.id` | El id del peer **remoto** (el que da el servidor). |
+| `this.connection` | El [RTCPeerConnection](GLOSARIO.md#7-rtcpeerconnection) real. `null` hasta `connect()`. |
+| `this.pendingIceCandidates` | Cola de [ICE candidates](GLOSARIO.md#13-candidatos-ice-que-llegan-antes-de-tiempo-pendingicecandidates) que llegaron antes de tener `remoteDescription`. |
+| `this.userName` | **Tu** nombre (no el del peer). |
+| `this.polite` | `this.userName < this.id` (comparación de strings). Define quién cede en una colisión de offers. Ver [polite/impolite](GLOSARIO.md#19-perfect-negotiation--peer-polite-e-impolite). |
+| `this.makingOffer` | `true` mientras estás creando tu offer. Sirve para detectar colisión. Ver [makingOffer](GLOSARIO.md#20-makingoffer-y-la-detección-de-colisión). |
+| `this.signaling` / `this.connections` / `this.audio` / `this.display` | Dependencias **compartidas**, se reciben en el constructor, no se crean aquí. |
 
-- Extracted `PeerConnection`: the offer/track/answer logic that used to be duplicated across three message-handling branches now lives in one class, one instance per participant.
-- Replaced the message-handling `switch` with a handler map (`{ offer: this.onOffer, ... }`) on `Orchestrator` — each message type is its own small, testable method.
-- Added perfect negotiation (`polite` / `makingOffer` per `PeerConnection`) to resolve the case where two participants offer audio to each other simultaneously — previously this produced an `InvalidStateError` and a failed connection.
-- Signaling messages for `offer`/`answer`/`ice` now carry a `to_client_id`, and the server routes them only to that recipient instead of broadcasting to the whole room — with three or more participants, the broadcast approach could apply a message meant for one pair to an unrelated connection.
-- Fixed disconnect/reconnect: the client now actually closes the WebSocket on hangup instead of leaving it open and opening a second one on rejoin; the server's exit notification now correctly names the participant who left (it previously misidentified them due to a variable name collision) and reaches the other participants (it previously crashed trying to serialize a socket object).
-- A departed participant's name and audio element are now removed from everyone else's screen, and the DOM containers used for that cleanup are cleared without accidentally destroying the placeholder elements needed for future joins.
-- Renamed the frontend classes and folders to consistent, short English names (`conections/conection.js` → `connections/connection.js`, `segnaling/` → `signaling/`, etc.) — this README already reflects the current names.
+| Método | Qué hace |
+|---|---|
+| `constructor(id, userName, signaling, connections, audio, display)` | Solo guarda todo lo de arriba. No toca la red. |
+| `connect()` | Crea `this.connection` con `connections.createConnection()`. Engancha `onIceCandidate` → `sendMessage("ice", candidate.toJSON())`. Engancha `onNegotiationNeeded` → `createOffer()` + `sendMessage("offer", offer)`. **Aquí es donde las offers se generan solas.** |
+| `addAudioTracks()` | Por cada track del micro que no esté ya en la conexión: `addAudioTrack` + `configureAudioSender`. |
+| `addDisplayTrack()` | Lo mismo con los tracks de pantalla. |
+| `onRemoteAudio(callback)` | Delega en `audio.onRemoteAudioTrack(this.id, this.connection, callback)`. |
+| `onRemoteVideo(callback, onEndDisplayShare)` | Delega en `display.onRemoteVideoTrack(...)`. |
+| `createOffer()` | `makingOffer = true` → `connections.createOffer` → `setLocalDescription` → devuelve la offer. En `finally`, `makingOffer = false`. |
+| `createAnswer(offerReceived)` | Calcula `collision = makingOffer \|\| signalingState !== "stable"`. `ignoreOffer = !polite && collision`. Si `ignoreOffer` → devuelve `null` (ignoro tu offer, sigo con la mía). Si no: `setRemoteDescription(offer)` → `createAnswer` → `setLocalDescription(answer)` → devuelve la answer. Ver [perfect negotiation](GLOSARIO.md#19-perfect-negotiation--peer-polite-e-impolite). |
+| `applyAnswer(data)` | `setRemoteDescription(data)`. Cierra una negociación que iniciaste tú. |
+| `addIceCandidate(candidate)` | Si ya hay `remoteDescription`: primero vacía `pendingIceCandidates`, luego añade el nuevo. Si no: lo mete en `pendingIceCandidates`. |
+| `sendMessage(type, data)` | Atajo: `signaling.sendMessage(type, data, null, this.id)` (siempre dirigido a este peer). |
+| `monitorState(onDead)` | Delega en `connections.monitorState(this.id, this.connection, onDead)`. |
+| `close()` | `audio.removeAudioTrackListener` + `display.removeVideoTrackListener` + `this.connection.close()`. |
 
-## What's New in v1.1.0
+### 6.6 `UI` — [ui/ui.js](ui/ui.js)
 
-- Added screen sharing support with a dedicated `Display` module and browser capture via `getDisplayMedia()`, following the same pattern as the existing audio flow.
-- Introduced configurable display quality settings up to 1080p at 60 FPS, with a sender bitrate target of roughly 8 Mbps and `degradationPreference: "maintain-framerate"` to keep the stream fluid on shared screens.
-- Added both a share button and a separate stop-sharing button in the UI, so users can stop screen sharing manually without relying only on the browser's native control.
-- Added dynamic renegotiation by exposing `onNegotiationNeeded` on `Connections` and automatically reacting to `negotiationneeded` inside `PeerConnection`, allowing media tracks to be added or removed after the call is already active.
-- Replaced the single-use remote-track Promise pattern with persistent callbacks: `onRemoteAudioTrack` and `onRemoteVideoTrack` filter by `track.kind` so the same peer can send audio now and share screen later without losing track handling.
-- Extended `PeerConnection` to receive a `Display` instance and added `addDisplayTrack()`, keeping the screen-share flow symmetric with the existing audio track logic.
-- Improved the screen-sharing lifecycle: when the partner ends sharing, the app removes each sender with `connection.removeTrack(sender)` to trigger automatic renegotiation; when the stream is removed remotely, it listens for `stream.onremovetrack` and removes the video from the DOM.
-- Updated the UI API to use separate methods for audio and video rendering (`showAudioPeer` / `showVideoPeer`, `removeAudio` / `removeVideo`), and added a dedicated `#video_site` container with CSS rules to prevent video overflow and keep the layout responsive.
-- Ensured new participants joining a room after screen sharing has already started receive the active display stream immediately by checking `display.stream` during `onJoin` and `onUsers` processing.
+Solo DOM. No sabe nada de WebRTC. Recibe datos ya listos y crea/borra elementos.
 
-## Future Improvements
+| Método | Qué hace |
+|---|---|
+| `bindEnterCallButton` / `bindExitCallButton` / `bindShareDisplayButton` / `bindStopShareDisplayButton(id, callback)` | Buscan el botón por id y ponen `element.onclick = () => callback()`. Los 4 son idénticos. |
+| `getElementById(id)` | `document.getElementById`, con `console.log` si no existe. |
+| `createVideoElement(src, id)` | Crea `<video autoplay>`, `srcObject = src` (un [stream](GLOSARIO.md#4-srcobject--cómo-se-veoye-un-stream-en-la-página)), `dataset.id = id`, intenta `play()`. Devuelve el elemento. |
+| `createAudioElement(src, id)` | Igual con `<audio autoplay>`. |
+| `createTextElement(id)` | Crea un `<h3>` con `textContent = id` e `id = id`. *(Recibe un 2º argumento que no usa.)* |
+| `disableButton(id)` / `enableButton(id)` | `element.disabled = true / false`. |
+| `appendAudio(container, el)` / `appendVideo(container, el)` | `container.appendChild(el)` y `el.controls = true`. |
+| `appendText(container, el)` | Solo `appendChild`. |
+| `removeAudio(id)` | `querySelector('audio[data-id="id"]')` y `.remove()`. |
+| `removeVideo(id)` | Igual con `video[data-id="id"]`. |
+| `removeText(id)` | `getElementById(id)` y `.remove()`. |
+| `showAudioPeer(id, audioStream)` | Crea el `<audio>` en `audio_site` **y** un `<h3>` con el id en `audio_from`. |
+| `showVideoPeer(id, videoStream)` | Crea el `<video>` en `video_site`. |
+| `showUsernameModal(id)` / `hideUsernameModal(id)` | Añade/quita la clase `activo` del overlay (el CSS hace el resto). |
+| `getUsername()` | `localStorage.getItem('username')`. |
+| `bindSaveUsername(id, callback)` | `onclick` del botón "Guardar" del modal. |
+| `getUsernameInput(id)` | `.value` del input. |
+| `showUsername(id, username)` | Pone `textContent = "klk " + username` en el `<h3>` de saludo. |
 
-- Replace the hardcoded signaling URL with environment-based configuration.
-- Add mute/unmute controls for microphone and call audio.
-- Improve the visual design with a more premium production UI.
-- Introduce room management and multiple call channels.
-- Add retry and reconnection logic for transient network failures beyond the manual "leave/rejoin" flow.
-- Persist participant metadata and room state on the backend.
-- Add call quality telemetry and clearer RTC diagnostics.
-- Implement lazy loading for any future media or UI-heavy assets.
-- Add an admin or monitoring dashboard for server-side visibility.
-- Migrate `sendMessage`/`send_message`'s growing list of optional positional parameters to a single options object, so adding a new field doesn't require touching the signature and every call site.
+### 6.7 `Orchestrator` — [main.js](main.js)
 
-## Credits
+El director de orquesta. Tiene el estado global y conecta señalización ↔ peers ↔ UI.
 
-- Built with native browser APIs: WebRTC, WebSocket, Media Capture, and screen-sharing support.
-- Python backend communication powered by the `websockets` library.
-- Connectivity supported by public STUN infrastructure from Google, Mozilla, Twilio, Sipgate, and Nextcloud as configured in the client.
-- The project structure follows a modular, framework-free frontend pattern that keeps responsibilities separated and easy to extend.
+| Miembro | Qué es |
+|---|---|
+| `this.connectionsList` | `Map` de `id del peer → PeerConnection`. La fuente de verdad de "con quién estoy conectado". |
+| `this.userName` | Tu nombre. |
+| `this.audio` / `this.display` / `this.ui` / `this.connections` / `this.signaling` | Las instancias únicas compartidas. |
 
-## Notes
+| Método | Qué hace |
+|---|---|
+| `constructor()` | Crea el `Map`, las 5 instancias, y llama `init()`. |
+| `init()` | Gestiona el nombre (modal o `localStorage`), deja los botones en su estado inicial y "ata" los 4 botones + el `beforeunload`. Ver el detalle de cada botón en la sección 5. |
+| `onOffer(id, data)` | Busca el peer. `await peer.addAudioTracks()` (asegura que tu audio va incluido en la answer). `peer.createAnswer(data)`. Si devolvió algo (no fue ignorada), manda `answer` al servidor. |
+| `onAnswer(id, data)` | `peer.applyAnswer(data)`. |
+| `onIce(id, data)` | `peer.addIceCandidate(data)`. |
+| `onExit(data)` | `removeDeadConnection(data)`. |
+| `onJoin(id)` | Peer **completo**: `new PeerConnection` → `connect()` → guardar en el `Map` → `addAudioTracks()` → (si compartes pantalla) `addDisplayTrack()` → `onRemoteAudio` / `onRemoteVideo` → `monitorState`. |
+| `onId(id)` | Peer **básico**: `new PeerConnection` → `connect()` → guardar en el `Map`. Nada más. *(No engancha tracks ni listeners de UI; ver notas en la sección 8.)* |
+| `onUsers(data)` | Recorre `data` (lista de ids ya presentes) y hace por cada uno lo mismo que `onJoin`. |
+| `onError(data)` | `alert(data)`. |
+| `listenForMessages()` | Registra `signaling.onMessage`. Dentro hay un objeto `handlers` que mapea cada `type` a su método. Si el tipo no existe, `console.log("Tipo de solicitud invalida.")`. |
+| `removeDeadConnection(id)` | `peer.close()` → `connectionsList.delete(id)` → `ui.removeAudio` / `removeText` / `removeVideo`. |
+| `handleServerDown()` | Cierra todos los peers, vacía el `Map`, rehabilita "Entrar". Se llama desde el `onclose` del WebSocket. |
+| `notifyExit()` | Usado en `beforeunload`: manda `exit_notification` con `connectionsList.keys()[0]` y vacía el `Map`. |
+| `stopSharingDisplay()` | Por cada peer: encuentra el sender de video y `connection.removeTrack(sender)`. Luego habilita "Compartir pantalla". |
 
-- The frontend is not bundled by a build tool; it is designed to run as a static module-based app.
-- The current UI is a functional prototype, so the README describes the architecture and production direction rather than overstating finished polish.
-- This project continues to evolve from its original voice-only design toward a broader real-time collaboration workflow without discarding the small, readable architecture that made the first version easy to maintain.
+Además, fuera de la clase:
+- `function onLoad()` — define un arranque alternativo pero **nadie lo llama**.
+- `const app = new Orchestrator()` ([main.js:378](main.js#L378)) — **este** es el arranque real.
+
+---
+
+## 7. Escenarios completos (con nombres reales)
+
+### Ana entra primero (sala vacía)
+
+1. Permiso de micro OK → WebSocket abierto → manda su nombre.
+2. El servidor le manda `users_in_connection` con lista **vacía** → `onUsers([])` no hace
+   nada.
+3. Ana está sola, esperando. Sus botones: "Salir" y "Compartir pantalla" habilitados.
+
+### Beto entra después
+
+1. Beto: permiso OK → WebSocket → nombre.
+2. Servidor a **Beto**: `users_in_connection: ["ana-id"]` → `onUsers` crea el
+   `PeerConnection` completo de Ana. `addAudioTracks()` dispara `negotiationneeded` → Beto
+   manda **offer** a Ana.
+3. Servidor a **Ana**: `join_notification: "beto-id"` → `onJoin` crea el `PeerConnection`
+   completo de Beto. `addAudioTracks()` dispara `negotiationneeded` → Ana manda **offer** a
+   Beto.
+4. **Colisión**: los dos mandaron offer. Entra
+   [perfect negotiation](GLOSARIO.md#19-perfect-negotiation--peer-polite-e-impolite): el
+   `impolite` ignora la offer que le llegó (`createAnswer` devuelve `null`), el `polite`
+   cede y responde. Queda **una** offer/answer válida.
+5. ICE candidates cruzando en ambos sentidos → cuando uno funciona,
+   `connectionState = "connected"`.
+6. Cada uno recibe el evento `track` del otro → aparece un `<audio>` con el id del otro.
+
+### Ana comparte pantalla
+
+1. `getDisplayMedia` → selector → Ana elige una ventana.
+2. `peer.addDisplayTrack()` para Beto → `negotiationneeded` → offer nueva (solo video se
+   añade) → Beto responde.
+3. Beto recibe `track` con `kind === "video"` → aparece el `<video>` de Ana.
+4. Beto además engancha `stream.onremovetrack`.
+
+### Ana deja de compartir (botón nativo del navegador)
+
+1. `track.onended` en Ana → `stopSharingDisplay()`.
+2. `removeTrack(senderVideo)` para Beto → renegociación.
+3. Beto: `stream.onremovetrack` → `ui.removeVideo("ana-id")`.
+
+### Beto cierra la pestaña
+
+1. `beforeunload` → `notifyExit()` → manda `exit_notification`.
+2. Servidor avisa a Ana: `exit_notification` → `onExit` → `removeDeadConnection("beto-id")`
+   → cierra la conexión y borra el `<audio>` de Beto.
+3. Si el mensaje no llegara, el `connectionState` de esa conexión pasaría a
+   `disconnected` / `failed` y `monitorState` haría la misma limpieza.
+
+### El servidor de señalización muere
+
+1. WebSocket `onclose` → `handleServerDown()`.
+2. Todas las `PeerConnection` se cierran, el `Map` se vacía, vuelve a estar habilitado
+   "Entrar".
+3. Las llamadas de audio que ya estaban `connected` podrían seguir un rato (WebRTC es
+   directo), pero la app ya limpió su estado, así que en la práctica la llamada termina.
+
+---
+
+## 8. Notas y puntos frágiles (para que no te sorprendan)
+
+Cosas que funcionan pero conviene conocer:
+
+- **Sin servidor TURN.** Solo hay STUN. En redes corporativas o CGNAT, algunas conexiones
+  nunca llegan a `connected`.
+- **`polite` compara valores distintos en cada lado.** Un peer hace
+  `miNombre < idDelOtro` y el otro hace `suNombre < idMío`. No es el patrón canónico
+  (que compara el mismo par en ambos lados), así que en teoría los dos podrían salir
+  `polite` o los dos `impolite`. Ver
+  [glosario #19](GLOSARIO.md#19-perfect-negotiation--peer-polite-e-impolite).
+- **`exit_notification` manda `connectionsList.keys()[0]`**, que es el id de **otro** peer,
+  no un id tuyo. Funciona solo si el servidor identifica al que sale por su socket y
+  no por ese `data`.
+- **El camino `id_notification` → `onId` → `onOffer` no engancha `onRemoteAudio` /
+  `onRemoteVideo` ni `monitorState`.** Si ese flujo se usa, ese peer se conecta pero su
+  `<audio>` nunca se crea y su caída no se detecta. Los caminos `onJoin` / `onUsers` sí lo
+  hacen todo.
+- **`onOffer` hace `addAudioTracks()` en cada offer recibida.** No duplica tracks (lo evita
+  `hasAudioTrack`), pero sí puede encadenar otra `negotiationneeded`.
+- **IDs mal escritos en el HTML** (`usarname_input`, `usarname_grettings`): están así a
+  propósito para que coincidan con el JS. No los "arregles" solo en un lado.
+- **`Signaling.disconect()`** — nombre sin la segunda "s". Está así en todo el código.
+- **`verificationSettingsVideo`** existe pero nadie la llama; es utilidad de debug, igual
+  que `Connections.getStats()`.
+
+---
+
+## 9. Glosario rápido de variables internas
+
+| Variable | Dónde | Qué guarda |
+|---|---|---|
+| `connectionsList` | `Orchestrator` | `Map` id→`PeerConnection`. Con quién estás conectado. |
+| `audio.stream` / `display.stream` | `Audio` / `Display` | Tu [MediaStream](GLOSARIO.md#1-mediastream-vs-mediastreamtrack) local (micro / pantalla). |
+| `trackHandlers` | `Audio` / `Display` | id del peer → función que escucha su evento `track`. Para poder desengancharla. |
+| `connection` | `PeerConnection` | El [RTCPeerConnection](GLOSARIO.md#7-rtcpeerconnection) hacia ese peer. |
+| `pendingIceCandidates` | `PeerConnection` | [ICE candidates](GLOSARIO.md#13-candidatos-ice-que-llegan-antes-de-tiempo-pendingicecandidates) en espera de `remoteDescription`. |
+| `polite` | `PeerConnection` | Si cedes o no ante una colisión de offers. |
+| `makingOffer` | `PeerConnection` | Si ahora mismo estás generando una offer. |
+| `socket` | `Signaling` | El WebSocket con el servidor de señalización. |
+| `userName` | `Orchestrator` y `PeerConnection` | Tu nombre. |
+
+---
+
+## 10. Por dónde empezar a leer el código
+
+1. [index.html](index.html) — mira los IDs.
+2. [main.js](main.js) — `constructor` e `init()`. Entiende los 4 botones.
+3. [peerconnection/peerconnection.js](peerconnection/peerconnection.js) — `connect()`,
+   `createOffer()`, `createAnswer()`.
+4. [connections/connection.js](connections/connection.js) — cómo se envuelve el
+   `RTCPeerConnection`.
+5. [audio/audio.js](audio/audio.js) y [display/display.js](display/display.js) — son
+   gemelos.
+6. [signaling/signaling.js](signaling/signaling.js) — el más corto.
+7. [GLOSARIO.md](GLOSARIO.md) — cada vez que un término no te cuadre.

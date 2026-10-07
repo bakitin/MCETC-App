@@ -63,6 +63,20 @@ class PeerConnection {
         };
     };
 
+    async addDisplayAudioTrack() {
+        const tracks = await this.display.getSystemAudioTracks();
+        const senders = await this.display.getVideoSenders(this.connection);
+
+        for (const track of tracks) {
+            const alreadyAdded = await this.display.hasVideoTrack(track, senders);
+
+            if (!alreadyAdded) {
+                const sender = await this.display.addVideoTrack(track, this.connection);
+                await this.display.configureVideoSender(sender);
+            };
+        };
+    };
+
     onRemoteAudio(callback) {
         this.audio.onRemoteAudioTrack(this.id, this.connection, callback)
     };

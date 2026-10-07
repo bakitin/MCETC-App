@@ -7,6 +7,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="style.css">
+    <script src="https://kit.fontawesome.com/140ac43554.js" crossorigin="anonymous"></script>
     <!-- <title>Michientucu App</title> -->
     <title>p1</title>
 </head>
@@ -16,47 +17,55 @@
     <div id="modal_overlay" class="overlay">
         <div class="modal">
             <input type="text" id="usarname_input" required placeholder="Que nombre quiere usar?">
-            <button id="btn_close">Guardar</button>
+            <button id="btn_close"><i class="fa-solid fa-check"></i> Guardar</button>
         </div>
     </div>
 
 
     <div id="background_container">
-        <h1>P1</h1>
-        <h3 id="usarname_grettings"></h3>
-
+        <header id="app_header">
+            <h1>P1</h1>
+            <h3 id="usarname_grettings"></h3>
+        </header>
 
         <div id="main_container">
 
-            <fieldset class="button_group">
-                <legend>Llamada</legend>
-                <button id="button_to_enter_into_the_call">
-                    Entrar a llamada
+            <div id="toolbar">
+                <button id="button_to_enter_into_the_call" class="icon_btn" title="Entrar a llamada">
+                    <i class="fa-solid fa-phone"></i>
                 </button>
-                <button id="button_to_close_connection">
-                    Salir de llamada
+                <button id="button_to_close_connection" class="icon_btn" title="Salir de llamada">
+                    <i class="fa-solid fa-phone-slash"></i>
                 </button>
-            </fieldset>
-
-            <fieldset class="button_group">
-                <legend>Pantalla compartida</legend>
-                <button id="button_to_share_display">
-                    Compartir pantalla
+                <button id="button_to_mute_microphone" class="icon_btn" title="Silenciar microfono">
+                    <i class="fa-solid fa-microphone"></i>
                 </button>
-                <button id="button_to_stop_share_display">
-                    Dejar de compartir
+
+                <span class="toolbar_divider"></span>
+
+                <button id="button_to_share_display" class="icon_btn" title="Compartir pantalla">
+                    <i class="fa-solid fa-display"></i>
                 </button>
-            </fieldset>
+                <button id="button_to_stop_share_display" class="icon_btn" title="Dejar de compartir">
+                    <i class="fa-solid fa-ban"></i>
+                </button>
+            </div>
 
+            <div id="stage">
+                <h3 id="audio_from"></h3>
+                <div id="audio_site"></div>
+                <div id="video_site"></div>
+            </div>
 
-            <h3 id="audio_from"></h3>
-            <div id="audio_site"></div>
-
-            <div id="video_site"></div>
+            <div id="chat_container">
+                <div id="chat_global"></div>
+                <form id="chat_input_row">
+                    <input type="text" id="chat_input" placeholder="Escribe un mensaje..." required>
+                    <button id="button_send_chat" class="icon_btn" title="Enviar"><i class="fa-solid fa-paper-plane"></i></button>
+                </form>
+            </div>
 
         </div>
-
-
     </div>
 
 
