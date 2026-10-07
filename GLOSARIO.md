@@ -1,53 +1,53 @@
-# Glosario de WebRTC y Señalización
+# WebRTC and Signaling Glossary
 
-Notas personales de aprendizaje. No es documentación del código: es una explicación de
-cada concepto que uso en la app, con una analogía y un trozo de mi propio código donde
-aparece.
+Personal learning notes. This is not code documentation: it's an explanation of each
+concept I use in the app, with an analogy and a snippet of my own code where it shows up.
 
-Orden: primero lo básico (capturar audio/video), luego la conexión entre pares, luego
-enviar/recibir tracks, y al final la parte "difícil" (renegociación y coordinación).
+Order: first the basics (capturing audio/video), then the peer-to-peer connection, then
+sending/receiving tracks, and finally the "hard" part (renegotiation and coordination).
 
 ---
 
-## PARTE 1 — Medios: capturar audio y pantalla
+## PART 1 — Media: capturing audio and screen
 
 ### 1. MediaStream vs MediaStreamTrack
 
-**Qué es:**
-- Un **MediaStreamTrack** (track) es UNA sola fuente: un micrófono, una cámara, o una
-  pantalla. Es solo audio, o solo video, nunca los dos a la vez.
-- Un **MediaStream** (stream) es una CAJA que agrupa varios tracks y los mantiene juntos.
+**What it is:**
+- A **MediaStreamTrack** (track) is ONE single source: a microphone, a camera, or a
+  screen. It's only audio or only video, never both at once.
+- A **MediaStream** (stream) is a BOX that groups several tracks and keeps them together.
 
-**Analogía:** el stream es una bandeja; cada track es un vaso encima. Puedes llevar la
-bandeja entera o coger un vaso suelto.
+**Analogy:** the stream is a tray; each track is a glass on top of it. You can carry the
+whole tray or pick up a single glass.
 
-**En mi código:** `this.stream` es la caja que me da el navegador; de ahí saco los tracks.
+**In my code:** `this.stream` is the box the browser gives me; I pull the tracks out of it.
 
 ```js
 // audio/audio.js
 this.stream = await navigator.mediaDevices.getUserMedia({ audio: { ... } });
 
 async getAudioTracks() {
-    return this.stream.getTracks(); // saca los tracks individuales de la caja
+    return this.stream.getTracks(); // pulls the individual tracks out of the box
 }
 ```
 
-Nota: `getTracks()` los devuelve todos. `getVideoTracks()` / `getAudioTracks()` filtran
-por tipo (en `display/display.js` uso `this.stream.getVideoTracks()`).
+Note: `getTracks()` returns all of them. `getVideoTracks()` / `getAudioTracks()` filter
+by type (in `display/display.js` I use `this.stream.getVideoTracks()`).
 
 ---
 
-### 2. getUserMedia y getDisplayMedia
+### 2. getUserMedia and getDisplayMedia
 
-- **`getUserMedia`**: pide acceso a **cámara y/o micrófono**. Dispara el pop-up de permiso.
-- **`getDisplayMedia`**: pide acceso a **la pantalla** (o una ventana/pestaña). Dispara el
-  selector de "¿qué quieres compartir?".
+- **`getUserMedia`**: requests access to the **camera and/or microphone**. Triggers the
+  permission pop-up.
+- **`getDisplayMedia`**: requests access to **the screen** (or a window/tab). Triggers the
+  "what do you want to share?" picker.
 
-Las dos son asíncronas, devuelven un MediaStream, y pueden fallar (el usuario dice "no" o
-cancela) — por eso van en `try/catch` y devuelvo `true`/`false`.
+Both are asynchronous, return a MediaStream, and can fail (the user says "no" or
+cancels) — that's why they're wrapped in `try/catch` and I return `true`/`false`.
 
-**Analogía:** `getUserMedia` es encender tu propia cámara. `getDisplayMedia` es apuntar la
-cámara a tu monitor.
+**Analogy:** `getUserMedia` is turning on your own camera. `getDisplayMedia` is pointing
+the camera at your monitor.
 
 ```js
 // audio/audio.js
@@ -63,17 +63,17 @@ this.stream = await navigator.mediaDevices.getDisplayMedia({
 });
 ```
 
-Esos objetos `audio: {...}` y `video: {...}` son **constraints** (restricciones): pides
-una calidad concreta, pero el navegador decide qué puede darte de verdad.
+Those `audio: {...}` and `video: {...}` objects are **constraints**: you ask for a
+specific quality, but the browser decides what it can actually give you.
 
 ---
 
-### 3. track.getSettings() — lo que el navegador te dio de verdad
+### 3. track.getSettings() — what the browser actually gave you
 
-Pides `1920x1080 @ 60fps` como *ideal*, pero quizá te da menos. `getSettings()` te dice
-los valores reales del track.
+You ask for `1920x1080 @ 60fps` as *ideal*, but you might get less. `getSettings()` tells
+you the track's real values.
 
-**Analogía:** pediste un café grande; miras la taza para ver de qué tamaño te lo dieron.
+**Analogy:** you ordered a large coffee; you look at the cup to see what size you got.
 
 ```js
 // display/display.js
@@ -86,30 +86,30 @@ async verificationSettingsVideo(track) {
 
 ---
 
-### 4. srcObject — cómo se ve/oye un stream en la página
+### 4. srcObject — how a stream is seen/heard on the page
 
-Un `<video>` o `<audio>` normal usa `src="archivo.mp4"`. Para un stream en vivo se usa
+A regular `<video>` or `<audio>` uses `src="file.mp4"`. For a live stream you use
 `.srcObject = stream`.
 
 ```js
 // ui/ui.js
 const videoElement = document.createElement('video');
 videoElement.autoplay = true;
-videoElement.srcObject = src; // 'src' aquí es un MediaStream, no una URL
+videoElement.srcObject = src; // 'src' here is a MediaStream, not a URL
 ```
 
 ---
 
-### 5. track.stop() — apagar la fuente de verdad
+### 5. track.stop() — actually turning off the source
 
-`stop()` en un track apaga el micro / cámara / pantalla a nivel de sistema (se apaga la
-lucecita). Es irreversible: para volver, hay que pedir el medio otra vez.
+`stop()` on a track turns off the mic / camera / screen at the system level (the little
+light goes off). It's irreversible: to get it back, you have to request the media again.
 
-Ojo: quitar un track de la conexión (`removeTrack`) **no** apaga la fuente. Son cosas
-distintas: uno deja de enviarlo, el otro lo apaga.
+Careful: removing a track from the connection (`removeTrack`) does **not** turn off the
+source. They're different things: one stops sending it, the other turns it off.
 
 ```js
-// main.js — al pulsar "dejar de compartir pantalla"
+// main.js — when clicking "stop sharing screen"
 const tracks = await this.display.getVideoTracks();
 for (const track of tracks) {
     track.stop();
@@ -120,35 +120,36 @@ for (const track of tracks) {
 
 ### 6. track.onended vs stream.onremovetrack
 
-Los dos avisan de que "el video de pantalla se acabó", pero en puntas distintas:
+Both signal that "the screen video is over", but on different ends:
 
-- **`track.onended`** → se dispara del lado de **quien comparte**, cuando la fuente termina
-  sola. Caso típico: el usuario pulsa el botón nativo del navegador "Dejar de compartir".
-  No lo provocaste desde tu código.
-- **`stream.onremovetrack`** → se dispara del lado de **quien recibe**, cuando un track que
-  estaba en ese stream remoto se quita (porque el otro hizo `removeTrack`).
+- **`track.onended`** → fires on the side of **the one sharing**, when the source ends on
+  its own. Typical case: the user clicks the browser's native "Stop sharing" button.
+  You didn't trigger it from your code.
+- **`stream.onremovetrack`** → fires on the side of **the one receiving**, when a track
+  that was in that remote stream gets removed (because the other side called
+  `removeTrack`).
 
-**Analogía:** `onended` = al que transmite se le acabó la cinta. `onremovetrack` = al que
-está mirando se le cortó ese canal.
+**Analogy:** `onended` = the broadcaster's tape ran out. `onremovetrack` = the viewer's
+channel got cut.
 
-En mi app conviven, uno en cada lado:
+In my app both coexist, one on each side:
 
 ```js
-// display/display.js — lado que COMPARTE
+// display/display.js — SHARING side
 track.onended = (event) => {
     onEndDisplayShare();
 }
 ```
 
 ```js
-// display/display.js — lado que RECIBE (dentro del handler del evento "track")
+// display/display.js — RECEIVING side (inside the "track" event handler)
 const stream = event.streams[0];
 stream.onremovetrack = (removeEvent) => {
     onEndDisplayShare();
 };
 ```
 
-Y quien dispara ese `onremovetrack` remoto es este `removeTrack` del otro peer:
+And what triggers that remote `onremovetrack` is this `removeTrack` from the other peer:
 
 ```js
 // main.js
@@ -157,16 +158,16 @@ if (videoSender) peer.connection.removeTrack(videoSender);
 
 ---
 
-## PARTE 2 — La conexión entre pares
+## PART 2 — The peer-to-peer connection
 
 ### 7. RTCPeerConnection
 
-Es EL objeto central de WebRTC. Representa la conexión directa de audio/video entre mi
-navegador y el de otra persona (*peer* = par, igual). Todo pasa por aquí: agregar tracks,
-crear offers, recibir el media del otro, saber si sigue viva.
+It's THE central WebRTC object. It represents the direct audio/video connection between
+my browser and another person's (*peer* = equal). Everything goes through here: adding
+tracks, creating offers, receiving the other side's media, knowing if it's still alive.
 
-**Analogía:** es la línea telefónica privada entre dos personas. La operadora (el servidor
-de señalización) solo ayuda a montar la llamada; una vez conectados, hablan directo.
+**Analogy:** it's the private phone line between two people. The operator (the signaling
+server) only helps set up the call; once connected, they talk directly.
 
 ```js
 // connections/connection.js
@@ -175,8 +176,8 @@ const connection = new RTCPeerConnection({
 });
 ```
 
-En mi app, cada persona remota tiene su propia `RTCPeerConnection`, guardada dentro de mi
-clase `PeerConnection`:
+In my app, each remote person has their own `RTCPeerConnection`, stored inside my
+`PeerConnection` class:
 
 ```js
 // peerconnection/peerconnection.js
@@ -185,21 +186,21 @@ this.connection = await this.connections.createConnection();
 
 ---
 
-### 8. Signaling (señalización) — y por qué hace falta un servidor aparte
+### 8. Signaling — and why a separate server is needed
 
-Dos navegadores que nunca se han hablado no tienen forma de encontrarse. Antes necesitan
-intercambiar unos "papeles": qué códecs soportan, qué IPs y puertos tienen, etc. WebRTC
-**genera** esos papeles pero **no los transporta** por ti. Tú tienes que llevarlos de un
-lado a otro por un canal que ya funcione.
+Two browsers that have never talked have no way of finding each other. First they need
+to exchange some "paperwork": which codecs they support, which IPs and ports they have,
+etc. WebRTC **generates** that paperwork but **doesn't carry it** for you. You have to
+move it from one side to the other through a channel that already works.
 
-Ese canal es el **servidor de señalización**. En mi caso, un WebSocket.
+That channel is the **signaling server**. In my case, a WebSocket.
 
-**Analogía:** quieres quedar con alguien para hablar en persona. Primero os mandáis
-mensajes por WhatsApp ("estoy en tal sitio, a tal hora") — eso es la señalización. Luego
-os veis y ya habláis sin WhatsApp — esa es la conexión WebRTC directa.
+**Analogy:** you want to meet someone to talk in person. First you text each other on
+WhatsApp ("I'm at this place, at this time") — that's signaling. Then you meet and talk
+without WhatsApp — that's the direct WebRTC connection.
 
-Qué viaja por mi señalización: `offer`, `answer`, `ice`, y avisos (`join_notification`,
-`exit_notification`, `users_in_connection`...).
+What travels through my signaling: `offer`, `answer`, `ice`, and notifications
+(`join_notification`, `exit_notification`, `users_in_connection`...).
 
 ```js
 // signaling/signaling.js
@@ -212,7 +213,7 @@ async sendMessage(type, data, username = null, to_client_id = null) {
 }
 ```
 
-El "router" que decide qué hacer con cada mensaje que llega:
+The "router" that decides what to do with each incoming message:
 
 ```js
 // main.js
@@ -229,16 +230,15 @@ if (handlers[type]) await handlers[type](id, data);
 
 ### 9. Offer / Answer / SDP
 
-Para ponerse de acuerdo, un lado manda una **offer** (oferta) y el otro contesta con una
-**answer** (respuesta). Ambas son objetos **SDP** (*Session Description Protocol*): un
-texto largo que describe "esto es lo que voy a enviar y cómo" — códecs, resolución,
-cifrado, etc.
+To reach an agreement, one side sends an **offer** and the other replies with an
+**answer**. Both are **SDP** objects (*Session Description Protocol*): a long text that
+describes "this is what I'm going to send and how" — codecs, resolution, encryption, etc.
 
-- **Offer**: "propongo hablar así".
-- **Answer**: "de acuerdo; y yo por mi parte, así".
+- **Offer**: "I propose we talk like this".
+- **Answer**: "agreed; and on my side, like this".
 
-**Analogía:** acordar el idioma antes de una reunión. Uno: "¿en español y por
-videollamada?". El otro: "vale, español, y yo además comparto pantalla".
+**Analogy:** agreeing on the language before a meeting. One: "in Spanish and over video
+call?". The other: "ok, Spanish, and I'll also share my screen".
 
 ```js
 // peerconnection/peerconnection.js
@@ -265,14 +265,14 @@ async createAnswer(offerReceived) {
 
 ### 10. setLocalDescription / setRemoteDescription
 
-Cada peer guarda DOS descripciones SDP:
-- **local description**: la mía (mi offer o mi answer). Se fija con `setLocalDescription`.
-- **remote description**: la del otro. Se fija con `setRemoteDescription`.
+Each peer stores TWO SDP descriptions:
+- **local description**: mine (my offer or my answer). Set with `setLocalDescription`.
+- **remote description**: the other side's. Set with `setRemoteDescription`.
 
-Hasta que las dos están puestas, la negociación no está cerrada.
+Until both are set, the negotiation isn't closed.
 
-**Analogía:** un contrato con dos firmas. La local es tu firma; la remota es la del otro.
-Sin las dos, no hay trato.
+**Analogy:** a contract with two signatures. The local one is your signature; the remote
+one is the other person's. Without both, there's no deal.
 
 ```js
 // connections/connection.js
@@ -286,22 +286,22 @@ async setRemoteDescription(connection, description) {
 
 ---
 
-### 11. ICE candidate, STUN, servidores ICE
+### 11. ICE candidate, STUN, ICE servers
 
-**El problema:** tu PC no sabe con qué IP y puerto es alcanzable desde internet (estás
-detrás de un router, NAT, etc.).
+**The problem:** your PC doesn't know which IP and port it's reachable at from the
+internet (you're behind a router, NAT, etc.).
 
-- **Servidor STUN**: le preguntas "¿cómo me ves desde fuera?" y te devuelve tu IP:puerto
-  público.
-- **ICE candidate**: cada posible dirección por la que te pueden contactar (tu IP local,
-  tu IP pública vía STUN, etc.). Se generan varias y se prueban hasta encontrar una que
-  funcione entre los dos peers.
-- **iceServers**: la lista de servidores STUN (y TURN, si hubiera) que le pasas a la
-  `RTCPeerConnection` al crearla.
+- **STUN server**: you ask it "how do you see me from outside?" and it returns your
+  public IP:port.
+- **ICE candidate**: each possible address you can be reached at (your local IP, your
+  public IP via STUN, etc.). Several are generated and tried until one works between the
+  two peers.
+- **iceServers**: the list of STUN (and TURN, if any) servers you pass to the
+  `RTCPeerConnection` when creating it.
 
-**Analogía:** quieres que un mensajero te lleve un paquete. Le das varias direcciones:
-"casa", "oficina", "portería del edificio". Él prueba cuál funciona. STUN es preguntarle a
-un amigo "¿cuál es mi dirección vista desde la calle?".
+**Analogy:** you want a courier to bring you a package. You give them several addresses:
+"home", "office", "building front desk". They try which one works. STUN is asking a
+friend "what's my address as seen from the street?".
 
 ```js
 // connections/connection.js
@@ -314,17 +314,17 @@ iceServers: [{
 }]
 ```
 
-Nota: solo tengo STUN. Si dos peers están en redes muy cerradas, haría falta un servidor
-**TURN** (reenvía el tráfico por él mismo). Con solo STUN, algunas conexiones pueden
-fallar.
+Note: I only have STUN. If two peers are on very locked-down networks, a **TURN** server
+would be needed (it relays the traffic through itself). With STUN only, some connections
+may fail.
 
 ---
 
 ### 12. onicecandidate
 
-Evento de la `RTCPeerConnection`: se dispara cada vez que el navegador **descubre un nuevo
-ICE candidate tuyo**. Tú lo coges y se lo mandas al otro peer por señalización. Van
-llegando poco a poco (a esto se le llama *trickle ICE*: gotean).
+An `RTCPeerConnection` event: it fires every time the browser **discovers a new ICE
+candidate of yours**. You take it and send it to the other peer through signaling. They
+arrive little by little (this is called *trickle ICE*: they trickle in).
 
 ```js
 // connections/connection.js
@@ -342,19 +342,19 @@ this.connections.onIceCandidate(this.connection, (candidate) => {
 });
 ```
 
-`candidate.toJSON()` lo convierte en un objeto plano para poder mandarlo como JSON por el
+`candidate.toJSON()` turns it into a plain object so it can be sent as JSON over the
 WebSocket.
 
 ---
 
-### 13. Candidatos ICE que llegan antes de tiempo (pendingIceCandidates)
+### 13. ICE candidates that arrive too early (pendingIceCandidates)
 
-Problema de orden: a veces te llega un ICE candidate del otro **antes** de que hayas
-puesto su `remoteDescription`. Si lo agregas en ese momento, error. Solución: guardarlos en
-una cola y agregarlos cuando ya exista la `remoteDescription`.
+Ordering problem: sometimes you get an ICE candidate from the other side **before** you've
+set its `remoteDescription`. If you add it at that moment, error. Solution: store them in
+a queue and add them once the `remoteDescription` exists.
 
-**Analogía:** te llegan las llaves de una casa que todavía no has comprado. Las metes en un
-cajón; cuando firmas la compra, las usas.
+**Analogy:** you receive the keys to a house you haven't bought yet. You put them in a
+drawer; when you sign the purchase, you use them.
 
 ```js
 // peerconnection/peerconnection.js
@@ -366,30 +366,31 @@ async addIceCandidate(candidate) {
         this.pendingIceCandidates = [];
         await this.connection.addIceCandidate(candidate);
     } else {
-        this.pendingIceCandidates.push(candidate); // a la cola
+        this.pendingIceCandidates.push(candidate); // into the queue
     }
 }
 ```
 
 ---
 
-## PARTE 3 — Enviar y recibir tracks
+## PART 3 — Sending and receiving tracks
 
 ### 14. addTrack / removeTrack
 
-- **`addTrack(track, stream)`**: mete uno de tus tracks (micro, pantalla) en la conexión
-  para que empiece a viajar al otro. Devuelve un **RTCRtpSender**.
-- **`removeTrack(sender)`**: deja de enviar ese track. Se le pasa el **sender**, no el
+- **`addTrack(track, stream)`**: puts one of your tracks (mic, screen) into the
+  connection so it starts traveling to the other side. Returns an **RTCRtpSender**.
+- **`removeTrack(sender)`**: stops sending that track. You pass it the **sender**, not the
   track.
 
-Cambiar lo que envías (agregar o quitar) obliga a **renegociar** (ver punto 18).
+Changing what you send (adding or removing) forces a **renegotiation** (see item 18).
 
-**Analogía:** `addTrack` es abrir un grifo hacia el otro; `removeTrack` es cerrarlo.
+**Analogy:** `addTrack` is opening a tap toward the other person; `removeTrack` is
+closing it.
 
 ```js
 // audio/audio.js
 async addAudioTrack(track, connection) {
-    return connection.addTrack(track, this.stream); // devuelve el sender
+    return connection.addTrack(track, this.stream); // returns the sender
 }
 ```
 
@@ -402,13 +403,14 @@ if (videoSender) peer.connection.removeTrack(videoSender);
 
 ### 15. RTCRtpSender / RTCRtpReceiver ("sender" / "receiver")
 
-- **Sender**: representa un track TUYO que se está enviando. Lo obtienes al hacer
-  `addTrack`, o con `connection.getSenders()`. Sirve para controlar cómo se envía (bitrate,
-  etc.) o para quitarlo.
-- **Receiver**: la contraparte — un track que estás RECIBIENDO. En mi código no lo toco
-  directamente; me llega ya envuelto en el evento `track`.
+- **Sender**: represents a track of YOURS that's being sent. You get it when calling
+  `addTrack`, or with `connection.getSenders()`. It's used to control how it's sent
+  (bitrate, etc.) or to remove it.
+- **Receiver**: the counterpart — a track you're RECEIVING. In my code I don't touch it
+  directly; it comes to me already wrapped in the `track` event.
 
-**Analogía:** el sender es tu antena emisora; el receiver, la del otro apuntando hacia ti.
+**Analogy:** the sender is your transmitting antenna; the receiver is the other person's,
+pointed at you.
 
 ```js
 // audio/audio.js
@@ -421,15 +423,15 @@ hasAudioTrack(track, senders) {
 }
 ```
 
-Ese `hasAudioTrack` recorre los senders para no meter dos veces el mismo track.
+That `hasAudioTrack` goes through the senders so the same track isn't added twice.
 
 ---
 
-### 16. sender.getParameters() / setParameters() — calidad de envío
+### 16. sender.getParameters() / setParameters() — send quality
 
-El sender permite ajustar cómo sale el track: bitrate máximo, y si la red va mal si
-prefiere bajar resolución o bajar fps. Se lee con `getParameters()`, se modifica el objeto,
-y se vuelve a aplicar con `setParameters()`.
+The sender lets you tune how the track goes out: max bitrate, and whether, if the network
+is bad, it prefers lowering resolution or lowering fps. You read it with
+`getParameters()`, modify the object, and apply it again with `setParameters()`.
 
 ```js
 // display/display.js
@@ -440,36 +442,38 @@ parameters.encodings[0].degradationPreference = "maintain-framerate";
 await sender.setParameters(parameters);
 ```
 
-En `audio/audio.js` hago lo mismo con `maxBitrate = 510000` para el micro.
+In `audio/audio.js` I do the same with `maxBitrate = 510000` for the mic.
 
 ---
 
-### 17. ontrack (evento "track") y event.streams
+### 17. ontrack ("track" event) and event.streams
 
-Se dispara en tu `RTCPeerConnection` cuando **empieza a llegar un track del otro peer**. El
-evento trae:
-- `event.track`: el track en sí. Tiene `.kind`: `"audio"` o `"video"`.
-- `event.streams[0]`: el stream al que pertenece — lo que enchufas al `<audio>` / `<video>`.
+Fires on your `RTCPeerConnection` when **a track from the other peer starts arriving**.
+The event carries:
+- `event.track`: the track itself. It has `.kind`: `"audio"` or `"video"`.
+- `event.streams[0]`: the stream it belongs to — what you plug into the `<audio>` /
+  `<video>`.
 
-**Analogía:** suena el timbre (`track`) y abres para recibir el paquete (`streams[0]`).
+**Analogy:** the doorbell rings (`track`) and you open the door to get the package
+(`streams[0]`).
 
 ```js
 // audio/audio.js
 const handler = (event) => {
     const kind = event.track.kind;
     if (kind === "audio") {
-        callback(event.streams[0]); // este stream va al <audio>
+        callback(event.streams[0]); // this stream goes to the <audio>
     }
 };
 connection.addEventListener("track", handler);
 this.trackHandlers[id] = handler;
 ```
 
-Filtro por `kind` porque audio y video llegan por el mismo evento, y cada módulo
-(Audio / Display) solo quiere el suyo.
+I filter by `kind` because audio and video arrive through the same event, and each module
+(Audio / Display) only wants its own.
 
-Uso `addEventListener("track", handler)` en vez de `connection.ontrack = ...` porque
-guardo el handler en `this.trackHandlers[id]` para poder **quitarlo** después, por peer:
+I use `addEventListener("track", handler)` instead of `connection.ontrack = ...` because
+I store the handler in `this.trackHandlers[id]` so I can **remove** it later, per peer:
 
 ```js
 // audio/audio.js
@@ -484,16 +488,16 @@ async removeAudioTrackListener(id, connection) {
 
 ---
 
-## PARTE 4 — Renegociación y coordinación (lo difícil)
+## PART 4 — Renegotiation and coordination (the hard part)
 
-### 18. negotiationneeded (renegociación)
+### 18. negotiationneeded (renegotiation)
 
-La primera negociación offer/answer no es la única. Cada vez que **cambias lo que envías**
-— agregas pantalla, la quitas — WebRTC dispara el evento `negotiationneeded` para avisar:
-"hay que volver a ponerse de acuerdo". Tú reaccionas creando una offer nueva.
+The first offer/answer negotiation isn't the only one. Every time you **change what you
+send** — add the screen, remove it — WebRTC fires the `negotiationneeded` event to say:
+"we need to agree again". You react by creating a new offer.
 
-**Analogía:** ya estabas en la reunión, pero ahora quieres proyectar diapositivas. Tienes
-que avisar: "esperad, voy a compartir algo más".
+**Analogy:** you were already in the meeting, but now you want to project slides. You
+have to let them know: "wait, I'm going to share something else".
 
 ```js
 // connections/connection.js
@@ -510,52 +514,52 @@ this.connections.onNegotiationNeeded(this.connection, async () => {
 });
 ```
 
-Por eso en mi app, al entrar a la llamada solo agrego audio; y cuando pulso "compartir
-pantalla", el `addDisplayTrack()` provoca `negotiationneeded` → offer nueva automática.
+That's why in my app, when joining the call I only add audio; and when I click "share
+screen", `addDisplayTrack()` triggers `negotiationneeded` → automatic new offer.
 
 ---
 
-### 19. Perfect negotiation / peer "polite" e "impolite"
+### 19. Perfect negotiation / "polite" and "impolite" peers
 
-**El problema (colisión de offers):** si los dos peers mandan una offer casi a la vez, la
-negociación se rompe — los dos quedan esperando una answer que nadie manda.
+**The problem (offer collision):** if both peers send an offer at almost the same time,
+the negotiation breaks — both end up waiting for an answer nobody sends.
 
-**La solución ("perfect negotiation"):** decidir de antemano quién cede. Uno es **polite**
-(educado) y el otro **impolite** (maleducado):
-- El **polite** cede: si le llega una offer mientras él también estaba ofertando, tira la
-  suya y acepta la del otro.
-- El **impolite** no cede: ignora la offer que le llegó y sigue con la suya.
+**The solution ("perfect negotiation"):** decide ahead of time who gives way. One is
+**polite** and the other is **impolite**:
+- The **polite** one gives way: if it receives an offer while it was also offering, it
+  drops its own and accepts the other's.
+- The **impolite** one doesn't give way: it ignores the incoming offer and keeps its own.
 
-La regla tiene que ser la misma en las dos puntas y dar resultados opuestos. En mi código
-comparo el nombre de usuario contra el id del peer:
+The rule has to be the same on both ends and give opposite results. In my code I compare
+the username against the peer's id:
 
 ```js
 // peerconnection/peerconnection.js
 this.polite = this.userName < this.id;
 ```
 
-**Analogía:** dos personas llegan a la vez a una puerta. Regla acordada: "quien tenga el
-nombre más corto alfabéticamente, pasa; el otro espera". Sin regla, los dos se quedan
-diciendo "tú primero".
+**Analogy:** two people reach a door at the same time. Agreed rule: "whoever's name comes
+first alphabetically goes through; the other waits". Without a rule, both stay there
+saying "after you".
 
 ---
 
-### 20. makingOffer y la detección de colisión
+### 20. makingOffer and collision detection
 
-Para aplicar la regla de arriba, cuando te llega una offer necesitas saber si TÚ estabas
-también en mitad de ofertar. Dos señales:
-- **`this.makingOffer`**: bandera que pones a `true` mientras creas y fijas tu offer (y a
-  `false` en el `finally`).
-- **`signalingState !== "stable"`**: la conexión no está en reposo, hay una negociación a
-  medias.
+To apply the rule above, when an offer arrives you need to know whether YOU were also in
+the middle of offering. Two signals:
+- **`this.makingOffer`**: a flag you set to `true` while creating and setting your offer
+  (and to `false` in the `finally`).
+- **`signalingState !== "stable"`**: the connection isn't at rest, there's a
+  half-finished negotiation.
 
-Si hay colisión y eres **impolite**, ignoras la offer entrante.
+If there's a collision and you're **impolite**, you ignore the incoming offer.
 
 ```js
 // peerconnection/peerconnection.js
 async createOffer() {
     this.makingOffer = true;
-    // ... crear y fijar la offer ...
+    // ... create and set the offer ...
     finally { this.makingOffer = false; }
 }
 
@@ -563,12 +567,12 @@ async createAnswer(offerReceived) {
     const collision  = this.makingOffer || this.connection.signalingState !== "stable";
     const ignoreOffer = !this.polite && collision;
     if (ignoreOffer) return null;
-    // ... procesar la offer normalmente ...
+    // ... process the offer normally ...
 }
 ```
 
-Cuando `createAnswer` devuelve `null`, en `main.js` el `if (answer)` evita mandar
-respuesta:
+When `createAnswer` returns `null`, in `main.js` the `if (answer)` avoids sending a
+response:
 
 ```js
 // main.js
@@ -582,12 +586,12 @@ if (answer) {
 
 ### 21. signalingState
 
-Estado de la **negociación** (no de la conexión de media). Los valores que me importan:
-- `"stable"`: no hay negociación pendiente, todo acordado. Punto de reposo.
-- otros (`"have-local-offer"`, `"have-remote-offer"`...): hay una offer puesta esperando su
-  answer.
+State of the **negotiation** (not of the media connection). The values I care about:
+- `"stable"`: no pending negotiation, everything agreed. Resting point.
+- others (`"have-local-offer"`, `"have-remote-offer"`...): there's an offer set, waiting
+  for its answer.
 
-Lo uso solo para detectar colisión: si no está `"stable"`, hay algo a medias.
+I only use it to detect collisions: if it's not `"stable"`, something is half-done.
 
 ```js
 // peerconnection/peerconnection.js
@@ -598,14 +602,15 @@ const collision = this.makingOffer || this.connection.signalingState !== "stable
 
 ### 22. connectionState / onconnectionstatechange
 
-Estado de la **conexión de media real**: ¿está fluyendo el audio/video? Valores: `"new"`,
+State of the **actual media connection**: is the audio/video flowing? Values: `"new"`,
 `"connecting"`, `"connected"`, `"disconnected"`, `"failed"`, `"closed"`.
 
-`onconnectionstatechange` se dispara cada vez que cambia. Lo uso para detectar que un peer
-se cayó y limpiarlo (cerrar su conexión, quitar su `<audio>`/`<video>` del DOM).
+`onconnectionstatechange` fires every time it changes. I use it to detect that a peer
+dropped and clean it up (close its connection, remove its `<audio>`/`<video>` from the
+DOM).
 
-**Analogía:** `signalingState` = "¿ya acordamos cómo hablar?". `connectionState` = "¿de
-verdad nos estamos escuchando ahora mismo?".
+**Analogy:** `signalingState` = "have we agreed on how to talk?". `connectionState` = "are
+we actually hearing each other right now?".
 
 ```js
 // connections/connection.js
@@ -627,10 +632,10 @@ monitorState(onDead) {
 
 ---
 
-### 23. getStats() — mirar por dentro (debugging)
+### 23. getStats() — looking inside (debugging)
 
-Devuelve un informe con métricas en vivo de la conexión: bitrate real, paquetes perdidos,
-resolución, latencia (RTT), qué par de ICE candidates ganó, etc. Solo para depurar.
+Returns a report with live connection metrics: real bitrate, lost packets, resolution,
+latency (RTT), which ICE candidate pair won, etc. Debugging only.
 
 ```js
 // connections/connection.js
@@ -642,24 +647,24 @@ statsReport.forEach((stat) => {
 
 ---
 
-## Resumen del flujo completo en mi app
+## Summary of the full flow in my app
 
-1. Entro a la llamada → `getUserMedia` me da el **MediaStream** del micro.
-2. El WebSocket (**signaling**) me avisa de otros peers → creo una **RTCPeerConnection**
-   por cada uno.
-3. `addTrack` mete mi audio → se dispara **negotiationneeded** → creo una **offer** (SDP) y
-   la mando por signaling.
-4. El otro pone mi offer como **remoteDescription**, crea su **answer**, me la manda, yo la
-   pongo como mi remoteDescription.
-5. En paralelo, ambos generan **ICE candidates** (con ayuda de **STUN**) y se los pasan por
-   signaling (**onicecandidate** → mensaje `ice`).
-6. Cuando un par de candidatos funciona, **connectionState** pasa a `"connected"` y el
-   audio empieza a fluir.
-7. El otro recibe mi audio por el evento **track** (**ontrack**) y lo enchufa a un
-   `<audio>` con `srcObject`.
-8. Si comparto pantalla, otro `addTrack` (de video) → otra vez **negotiationneeded** →
-   renegociación.
-9. Si dos offers chocan, **perfect negotiation** (polite / impolite + `makingOffer` +
-   `signalingState`) decide quién cede.
-10. Si un peer se cae, **onconnectionstatechange** lo detecta → cierro su conexión y limpio
-    el DOM.
+1. I join the call → `getUserMedia` gives me the mic's **MediaStream**.
+2. The WebSocket (**signaling**) tells me about other peers → I create one
+   **RTCPeerConnection** for each.
+3. `addTrack` adds my audio → **negotiationneeded** fires → I create an **offer** (SDP)
+   and send it through signaling.
+4. The other side sets my offer as its **remoteDescription**, creates its **answer**,
+   sends it to me, and I set it as my remoteDescription.
+5. In parallel, both generate **ICE candidates** (with help from **STUN**) and pass them
+   through signaling (**onicecandidate** → `ice` message).
+6. When a candidate pair works, **connectionState** becomes `"connected"` and the audio
+   starts flowing.
+7. The other side receives my audio through the **track** event (**ontrack**) and plugs
+   it into an `<audio>` with `srcObject`.
+8. If I share my screen, another `addTrack` (video) → **negotiationneeded** again →
+   renegotiation.
+9. If two offers collide, **perfect negotiation** (polite / impolite + `makingOffer` +
+   `signalingState`) decides who gives way.
+10. If a peer drops, **onconnectionstatechange** detects it → I close its connection and
+    clean up the DOM.
